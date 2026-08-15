@@ -505,14 +505,28 @@ string in `eslint-plugin-react`, sitting directly under its own
   }
   ```
 
-  — and reporting it is noise on correct code. What that exemption cannot read
-  is listed with the code: `&&`/`||` short-circuits are not treated as guards
-  (still reported); an `else` arm of an error-inspecting `if` counts as guarded
-  even though it is the *general* path, so `if (err.code === "X") { log(err); }
-  else { return res.json({ ok: true }); }` is a miss; and a `return` nested in a
-  loop inside the catch reads as "control falls out". All three apply only to a
-  2xx that is already guarded — an unconditional one anywhere in the block is
-  reported regardless.
+  — and reporting it is noise on correct code. The condition does not have to
+  name the binding: because `err` is `unknown` in TypeScript, the idiomatic
+  spelling narrows through a local first, and that is followed —
+  `const code = (err as { code?: string }).code`, the destructured
+  `const { code } = err`, its renamed form `{ code: c }`, and transitive chains
+  like `const e = err; const code = e.code`. Order does not matter; the widening
+  runs to a fixpoint. **This was the shape most often written and least often
+  handled: for the first three releases only the direct spelling was recognised,
+  so the version of the pattern that appears most in real TypeScript was the
+  version reported.** Found by running the rule against a 484-file repository,
+  not by a fixture — the suite was green at 449 tests the whole time it was open.
+
+  What that exemption still cannot read is listed with the code: `&&`/`||`
+  short-circuits are not treated as guards (still reported); an `else` arm of an
+  error-inspecting `if` counts as guarded even though it is the *general* path,
+  so `if (err.code === "X") { log(err); } else { return res.json({ ok: true }); }`
+  is a miss; a `return` nested in a loop inside the catch reads as "control falls
+  out"; and a bare derived name — `if (code)` where `code` came from the error —
+  is treated like `if (err)` and does **not** count as discrimination, because it
+  asks whether the error has a field rather than which error it is. All apply
+  only to a 2xx that is already guarded — an unconditional one anywhere in the
+  block is reported regardless.
 - **A chain's status is only read when the chain STARTS at the response
   object.** `res.status(500).json(...)` and `reply.code(204).send()` are read
   correctly, because `status`/`code` follow the receiver directly. A terminal
