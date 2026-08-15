@@ -404,7 +404,88 @@ function branchEnd(text, i) {
  * exempted by the letter of the rule and caught by nothing here; the second
  * half of the test below is what stands between it and silence.
  */
-function guardedRegions(body, names) {
+/**
+ * Every name in this catch body bound to something derived from the error,
+ * seeded with the binding itself.
+ *
+ * `inspectsError` asked the condition to name the binding TEXTUALLY. In
+ * TypeScript the caught value is `unknown`, so narrowing through a local is not
+ * an exotic spelling — it is the idiomatic one:
+ *
+ *     catch (err) {
+ *       const code = (err as { code?: string }).code;
+ *       if (code === "P2002") return NextResponse.json({ duplicate: true });
+ *     }
+ *
+ * The direct form was recognised and this one was not, which means the shape
+ * that appears MOST in real TypeScript was the shape reported. Found by C1
+ * running `45fc147` against `zpl-finance`; the suite was green at 449 tests the
+ * whole time, and it took real code to surface it — the same argument this
+ * check was built on, pointed back at it.
+ *
+ * Destructuring is the other half of the same idiom (`const { code } = err`)
+ * and is bound here too. Widening is transitive — `const e = err` then
+ * `const code = e.code` — and iterates to a fixpoint bounded by the number of
+ * declarations, so neither a chain nor a cycle can spin.
+ *
+ * `body` arrives already masked, so a declaration inside a string or a comment
+ * is blank here and cannot open a gate. That is the lexer's invariant doing the
+ * work, not a second check on top of it.
+ */
+function derivedNames(body, binding) {
+  const names = [...binding];
+  if (names.length === 0) return names;
+
+  // `const x =`, `let {a, b: c} =`, with an optional type annotation between.
+  const DECL = /\b(?:const|let|var)\s+(?:([A-Za-z_$][\w$]*)|\{([^{}]*)\})\s*(?::[^=;\n]+)?=/g;
+
+  // The initialiser: from after `=` to the `;` that closes the statement at
+  // depth zero. Bounded, so a body missing its semicolon cannot walk to the end
+  // of the file on every pass.
+  const initialiser = (from) => {
+    let depth = 0;
+    const stop = Math.min(body.length, from + 600);
+    for (let i = from; i < stop; i += 1) {
+      const c = body[i];
+      if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) return body.slice(from, i);
+        depth -= 1;
+      } else if (c === ';' && depth === 0) return body.slice(from, i);
+    }
+    return body.slice(from, stop);
+  };
+
+  const mentions = (text) => names.some((n) => new RegExp(`\\b${n}\\b`).test(text));
+
+  // A later declaration can be fed by an earlier one, and the regex runs in
+  // source order, so one pass can miss a chain written in any other order.
+  // Repeat until nothing new is bound; each pass must add at least one name.
+  for (let pass = 0; pass < 8; pass += 1) {
+    const before = names.length;
+    DECL.lastIndex = 0;
+    let m;
+    while ((m = DECL.exec(body))) {
+      if (!mentions(initialiser(DECL.lastIndex))) continue;
+      if (m[1]) {
+        if (!names.includes(m[1])) names.push(m[1]);
+        continue;
+      }
+      // `{ code }` binds `code`; `{ code: c }` binds `c`, not `code`.
+      for (const part of m[2].split(',')) {
+        const bound = part.includes(':') ? part.slice(part.indexOf(':') + 1) : part;
+        const id = bound.trim().replace(/^\.\.\./, '').split('=')[0].trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(id) && !names.includes(id)) names.push(id);
+      }
+    }
+    if (names.length === before) break;
+  }
+
+  return names;
+}
+
+function guardedRegions(body, binding) {
+  const names = derivedNames(body, binding);
   if (names.length === 0) return [];
   const inspectsError = (cond) => {
     // `if (err)` inside a catch is not discrimination — it is always true, and

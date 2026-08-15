@@ -211,6 +211,110 @@ test('a destructured binding is followed into the condition', () => {
   );
 });
 
+// ── narrowing through a local ────────────────────────────────────────────────
+//
+// In TypeScript the caught value is `unknown`, so the condition usually tests a
+// LOCAL derived from the error rather than the binding itself. Only the direct
+// spelling was recognised, which meant the shape that appears most in real
+// TypeScript was the shape reported. Found by C1 running 45fc147 against
+// zpl-finance — 484 files, one critical, on correct code. The suite was green at
+// 449 tests the whole time it was broken, which is why the negative cases below
+// matter more than the positive ones: the fix REMOVES reports, and a fix that
+// removes too many is indistinguishable from a green suite.
+
+test('a condition on a local derived from the error is discrimination', () => {
+  const narrowed = {
+    'const, property read': [
+      "const code = (err as { code?: string }).code;",
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'log(err);',
+    ],
+    destructured: [
+      'const { code } = err as { code?: string };',
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'log(err);',
+    ],
+    'destructured and renamed': [
+      'const { code: c } = err as { code?: string };',
+      "if (c === 'P2002') return NextResponse.json({ dup: true });",
+      'log(err);',
+    ],
+    'transitive chain': [
+      'const e = err;',
+      'const code = e.code;',
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'log(err);',
+    ],
+    'declared after the guard it feeds': [
+      // Source order must not decide: the widening runs to a fixpoint.
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'const code = err.code;',
+      'log(err);',
+    ],
+    'multi-line initialiser': [
+      'const code = (',
+      '  err as { code?: string }',
+      ').code;',
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'log(err);',
+    ],
+  };
+  for (const [label, body] of Object.entries(narrowed)) {
+    assert.deepEqual(scan(body), [], `${label}: a discriminating catch was reported`);
+  }
+});
+
+test('a local NOT derived from the error opens no gate', () => {
+  // The whole risk of the widening above. If any declaration could exempt a
+  // 2xx, the loudest swallow there is hides behind `const ok = true`.
+  const swallows = {
+    'unrelated constant': [
+      'const ok = true;',
+      'if (ok) return NextResponse.json({ received: true });',
+    ],
+    'unrelated read': [
+      'const mode = req.headers.get("x-mode");',
+      "if (mode === 'test') return NextResponse.json({ received: true });",
+      'return NextResponse.json({ received: true });',
+    ],
+    'derived name never tested': [
+      // Bound from the error, but no condition inspects it — nothing is guarded.
+      'const code = err.code;',
+      'return NextResponse.json({ received: true });',
+    ],
+    'bare derived name': [
+      // `if (code)` says the error HAS a code, not WHICH one — the same weakness
+      // as `if (err)`, and exempted for the same reason: it is not discrimination.
+      'const code = err.code;',
+      'if (code) return NextResponse.json({ received: true });',
+      'return NextResponse.json({ received: true });',
+    ],
+    'declaration inside a string': [
+      // The lexer blanks it, so it can never bind. Belt and braces: if the mask
+      // ever regresses, this test fails loudly instead of going quiet.
+      'log("const code = err.code;");',
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'return NextResponse.json({ received: true });',
+    ],
+  };
+  for (const [label, body] of Object.entries(swallows)) {
+    assert.equal(scan(body).length, 1, `${label}: the swallow was exempted`);
+  }
+});
+
+test('narrowing through a local still needs a non-2xx way out', () => {
+  // Both halves of fix #1 survive the widening: recognising a specific error
+  // exempts nothing if every exit answers 2xx anyway.
+  assert.equal(
+    scan([
+      'const code = err.code;',
+      "if (code === 'P2002') return NextResponse.json({ dup: true });",
+      'return NextResponse.json({ received: true });',
+    ]).length,
+    1
+  );
+});
+
 test('a guarded 2xx whose catch has NO other way out is still reported', () => {
   // Both halves of the test, one failing each way. Every one of these answers
   // 2xx on every path the guard can take, so the guard exempts nothing.
