@@ -67,7 +67,7 @@ Copied verbatim, including the upsell row the report always appends:
   --------------------------------------------------------------------------
   2 issues · 1 critical · 3 files · 0.1s
 
-  → 5 more checks in prodcheck pro
+  → 4 more checks in prodcheck pro
 ```
 
 The prose is long because it is the finding's own `impact` field, not a
@@ -89,22 +89,23 @@ if it has not actually broken something, it is not a rule.
 
 ### Shipping today
 
-Two rules run on every scan. Both are free and open source
-(MIT), and both are in [`src/checks/index.mjs`](src/checks/index.mjs) — that
+Three rules run on every scan. All are free and open source
+(MIT), and all are in [`src/checks/index.mjs`](src/checks/index.mjs) — that
 array is the only list that decides what actually runs.
 
 | Check | What it catches |
 | --- | --- |
 | `webhook-swallows-2xx` | `catch` in a webhook handler returning 2xx without re-throwing |
 | `rate-limit-bypass` | a rate limiter keyed on `X-Forwarded-For` read by hand instead of the address the framework resolved |
+| `env-secret-fallback` | a credential read from the environment with a silent fallback to a literal, in a file that calls out to the internet |
 
 ### Designed, not yet implemented
 
-These five are the rest of the seven-rule design. **None of them ships in any
+These four are the rest of the seven-rule design. **None of them ships in any
 form today** — there is no code for them in this repository, free or paid, and
 `prodcheck` will not report them however you invoke it. They are listed because
-the report's `→ 5 more checks` row refers to exactly this table, and because
-each one came from the same place the two above did: a bug that shipped.
+the report's `→ 4 more checks` row refers to exactly this table, and because
+each one came from the same place the three above did: a bug that shipped.
 
 | Check | What it will catch |
 | --- | --- |
@@ -112,7 +113,13 @@ each one came from the same place the two above did: a bug that shipped.
 | `account-delete-blocked` | foreign keys to `user` with `NO ACTION`/`RESTRICT` that make erasure fail |
 | `migrations-not-replayable` | migration chain that does not run against an empty database |
 | `backup-unencrypted` | plaintext dumps, `pg_dumpall` carrying role hashes |
-| `quota-per-key` | usage counted on `api_key_id` instead of `user_id` |
+
+The design is seven, so shipping `env-secret-fallback` cost this table an entry:
+`quota-per-key` (usage metered on `api_key_id` rather than `user_id`) came out
+when the new rule went in. That is a decision, not an oversight, and it is
+recorded in [`src/checks/index.mjs`](src/checks/index.mjs) beside the
+subtraction that keeps the two counts honest — `LOCKED_PAID_CHECKS` is
+`7 - checks.length`, never a number typed in twice.
 
 ## Usage
 
@@ -209,6 +216,16 @@ identities, and only one of them is a bypass.
 Every MEDIUM carries that sentence and the file:line of the socket source it
 saw. **`--fail-on high` is the default, and it does not fail a build on a
 MEDIUM.** Run `--fail-on medium` when you want to review every one of them.
+
+`env-secret-fallback` uses the same contract, for the same reason. HIGH is a
+credential defaulted to a literal in a file that also calls out to the network,
+and the finding names the outbound line. MEDIUM is the identical default with no
+outbound call visible in that file — still a default credential compiled into the
+source, and inherited by everything importing it, but prodcheck cannot show where
+it is spent and does not pretend to. Its third outcome is silence, and the
+fallback's own value decides it: `''`, `'undefined'`, `'CHANGEME'` and
+`'REPLACE_ME'` fail loudly the first time they are used, which is the behaviour
+the rule asks for rather than the bug it looks for.
 
 This replaced a suppression that tried to decide the question and stayed silent
 when it thought a rescue was present. Seven rounds of adversarial testing showed
@@ -477,17 +494,45 @@ string in `eslint-plugin-react`, sitting directly under its own
 - Any `throw` inside the catch body suppresses the finding, so conditional
   rethrows are treated as intentional. This is tuned for low noise: a finding
   you can't trust is worse than a miss you know about.
-- **The Express branch never reads the status a chain sets.** `res.json(...)` in
-  a catch is reported whatever came before it, and the only reason
-  `res.status(500).json(...)` escapes is that `res` is not textually adjacent to
-  `.json`. So the same 500 written as two statements is a false positive, and a
-  real 2xx swallow written as `res.set(…).status(200).json(…)` is a miss:
+- **A 2xx on a branch that inspects the caught error is not reported**, provided
+  the catch also has a way out that does not answer 2xx. That is the idempotency
+  pattern —
 
   ```js
-  res.status(500).json({ e });               // silent   — by accident
+  catch (err) {
+    if (err.code === "P2002") return NextResponse.json({ duplicate: true });
+    log(err);          // anything else falls through and is processed for real
+  }
+  ```
+
+  — and reporting it is noise on correct code. What that exemption cannot read
+  is listed with the code: `&&`/`||` short-circuits are not treated as guards
+  (still reported); an `else` arm of an error-inspecting `if` counts as guarded
+  even though it is the *general* path, so `if (err.code === "X") { log(err); }
+  else { return res.json({ ok: true }); }` is a miss; and a `return` nested in a
+  loop inside the catch reads as "control falls out". All three apply only to a
+  2xx that is already guarded — an unconditional one anywhere in the block is
+  reported regardless.
+- **A chain's status is only read when the chain STARTS at the response
+  object.** `res.status(500).json(...)` and `reply.code(204).send()` are read
+  correctly, because `status`/`code` follow the receiver directly. A terminal
+  method that does not — `res.json(...)` after a separate `res.status(500)`, or
+  a chain opening with a different verb — is not:
+
+  ```js
+  res.status(500).json({ e });               // silent   — correct
+  reply.code(204).send();                    // CRITICAL — correct
   res.status(500); res.json({ e });          // CRITICAL — false positive
   res.set('h', 'v').status(200).json({ o }); // silent   — real bug, missed
   ```
+
+- **The response receivers are a fixed list** — `res`, `reply`, `response`,
+  `resp`, `ctx`, plus `c` in a file that imports hono. A handler that names its
+  response object anything else is missed, and that is deliberate: "any
+  identifier" reports `logger.send(err)` and `queue.end()`. For the same reason
+  `.text()`/`.html()`/`.body()` count on `c` alone (they are also how a `fetch`
+  body is read), and a call whose result is assigned — `const b = await
+  response.json()` — is read as a body read, not an answer.
 
 - **The status option is matched as text, and only as three digits.**
   `{ status: 99 }`, `{ status: 5000 }` and `{ status: code }` are all treated as
@@ -640,6 +685,84 @@ the socket source and reports the read anyway, at MEDIUM, because proving the
 defence governs the read is dataflow. This is deliberate noise: the alternative
 was staying quiet, and staying quiet is what one unrelated line could buy.
 `--fail-on high` is the default, so none of these break a build.
+
+### `env-secret-fallback`
+
+**The variable NAME is the whole gate, and it is a substring test.** A secret is
+whatever is spelled `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`,
+`CREDENTIAL`, `AUTH`, `DSN`, `CONNECTION_STRING` or `PRIVATE`, case-insensitively
+and anywhere in the name. That is wrong in both directions and both are stated
+rather than hidden:
+
+```js
+process.env.AUTHOR_NAME || 'anon'     // ← reported. "AUTH" is in "AUTHOR".
+process.env.FOO || 'sk_live_abc123'   // ← silent. Nothing lexical knows FOO is
+                                      //   a Stripe key.
+```
+
+The over-reporting direction costs one finding a reader dismisses in a second.
+The alternative — flagging every environment variable with a string default —
+reports `process.env.PORT || 3000` and `process.env.NODE_ENV || 'development'`,
+which are correct code in every Node service ever written, and a rule that does
+that is switched off the same day.
+
+**One over-report was too common to leave standing, and the last segment of the
+name now vetoes the match.** `AUTH_URL` is NextAuth's own variable name, it
+holds an origin rather than a credential, and defaulting it to the production
+URL is deliberate. On the first run against `zpl-finance` it was **six of nine
+findings, across five files**, purely because `AUTH` is a substring of
+`AUTH_URL`. So a name ending in `URL`, `URI`, `ENDPOINT`, `HOST`, `HOSTNAME`,
+`DOMAIN`, `ORIGIN`, `PATH`, `DIR`, `PORT` or `REGION` is configuration however
+its earlier segments read — while `URL_SECRET` and `ENDPOINT_API_KEY` are still
+reported, because the veto is last-segment-only. The price is stated rather than
+hidden: a URL carrying its own credentials, `REDIS_AUTH_URL` defaulting to
+`redis://user:pass@…`, is now a miss.
+
+**Defaults expressed through a schema library are not seen.** This rule matches
+`??`, `||` and destructuring defaults on `process.env`. It does not read zod,
+envalid, convict or joi:
+
+```ts
+const envSchema = z.object({
+  SECRET_KEY: z.string().min(32),                 // ← correct, and invisible
+  SECRET_KEY: z.string().default('dev-secret'),   // ← the same bug, and a MISS
+});
+envSchema.safeParse(process.env);
+```
+
+`codex-backend/src/config.ts` is the first shape and prodcheck correctly says
+nothing about it — but it would say nothing about the second either, and the
+second is exactly this rule's bug wearing a schema.
+
+**The outbound test is file-scoped and coarse.** It asks "does this file reach
+the network at all" — `fetch(`, `axios`, `got(`, `http.request` /
+`https.request`, and `.post(` / `.get(` whose argument carries an absolute URL or
+a `url`/`uri`/`endpoint`/`host` identifier. It does *not* ask whether this
+particular credential reaches that particular call, because that is dataflow over
+a control-flow graph and this tool has no parser. The answer only ever chooses
+between HIGH and MEDIUM; nothing is silenced by it. A leading `/` is deliberately
+not enough — `app.post('/api/charge', handler)` registers an *inbound* route, and
+reading a routing table as an outbound call would promote every Express app to
+HIGH.
+
+**A fallback whose value this file cannot see is not judged.** `process.env.KEY
+|| DEFAULT_KEY` is resolved only when `DEFAULT_KEY` is assigned a string literal
+in the same file. Imported from `./defaults`, or returned by `getSecret()`, and
+the read is left alone — an accusation about a value nobody reading the report
+can check is worse than a miss.
+
+**There is no cross-file phase.** Unlike `rate-limit-bypass`, this bug is not
+split across modules: the offending line is complete on its own and the fix goes
+exactly where the fallback is written. A config module that defaults a key and a
+route that spends it are already covered — the config module is reported at
+MEDIUM, on the line that has to change either way.
+
+**The finding quotes the fallback back at you, truncated to 32 characters**, and
+`fix.remove` is the offending source line in full. If a real credential was
+committed as the default, it appears in the report and therefore in your CI log.
+That is the same line you are being asked to delete, so this is a reason to
+rotate it rather than a reason to hide it — but know it before piping the JSON
+somewhere public.
 
 ## About
 

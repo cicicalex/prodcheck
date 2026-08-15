@@ -92,6 +92,310 @@ test('does not flag a non-webhook file whose catch returns 200', () => {
   assert.deepEqual(check({ path: 'payments.ts', content: src }), []);
 });
 
+// ── the acceptance fixture ──────────────────────────────────────────────────
+//
+// `fixtures/webhook/webhook-examples.ts` is a VERBATIM copy of the labelled
+// fixture C1 built while implementing the same rule independently
+// (_ZPL_TEAM/pentru-C4/ship-safe-webhook/fixtures/webhook-examples.ts). It is
+// kept byte-identical, Romanian comments and all — they name each case — so the
+// two copies stay diffable and either side can re-sync from the other. Only his
+// COVERAGE was taken: his implementation parses with `typescript`, and a
+// runtime dependency is not something this tool is allowed to have.
+//
+// It is the acceptance set for this rule: five BAD that must fire at their exact
+// lines, four GOOD that must stay silent. Both halves cost something real.
+//
+//   bad5_replyCode204   Fastify `reply.code(204).send()`. 204 is 2xx and the
+//                       provider reads it as delivered; the shipped detector
+//                       knew `res.status/json` and nothing else, so this was a
+//                       MISS.
+//   good5_idempotenta…  a catch that answers 200 only on the branch that
+//                       recognises a duplicate-key violation and falls through
+//                       for every other error. MODELLED ON REAL PRODUCTION CODE
+//                       — it was C1's first false positive, found by running his
+//                       detector on a real repository, and it was this one's
+//                       too. Every serious payment webhook has a duplicate
+//                       branch, so reporting it is noise on correct code.
+//
+// The lines below are the `catch` keyword's line, which is where this rule
+// anchors a finding.
+
+const ACCEPTANCE = 'webhook-examples.ts';
+
+test('acceptance fixture: all five BAD cases fire, at their exact lines', () => {
+  const got = detect(ACCEPTANCE)
+    .map((f) => ({ line: f.line, remove: f.fix.remove[0] }))
+    .sort((a, b) => a.line - b.line);
+  assert.deepEqual(got, [
+    { line: 37, remove: 'res.status(200).json({ received: true });' }, // bad1
+    { line: 48, remove: 'res.json({ ok: true });' }, // bad2
+    { line: 59, remove: 'return NextResponse.json({ received: true });' }, // bad3
+    { line: 70, remove: 'return new Response("ok", { status: 200 });' }, // bad4
+    { line: 81, remove: 'reply.code(204).send();' }, // bad5 — the recall gap
+  ]);
+  for (const f of detect(ACCEPTANCE)) {
+    assert.equal(f.rule, rule);
+    assert.equal(f.severity, 'critical');
+  }
+});
+
+test('acceptance fixture: no GOOD case is reported', () => {
+  // Asserted by line RANGE rather than by count, so that a future regression
+  // reports which correct handler it started flagging. Each range is the whole
+  // function, `catch` line included.
+  const good = {
+    good1_status500: [92, 100],
+    good2_reAruncare: [108, 116],
+    good3_semnaturaInvalida: [119, 127],
+    good5_idempotentaConditionala: [139, 153],
+    good4_lant503: [156, 164],
+  };
+  const lines = detect(ACCEPTANCE).map((f) => f.line);
+  for (const [name, [from, to]] of Object.entries(good)) {
+    const hit = lines.find((l) => l >= from && l <= to);
+    assert.equal(hit, undefined, `${name} (lines ${from}-${to}) was reported at line ${hit}`);
+  }
+});
+
+// ── fix #1: a 2xx under a condition that inspects the error ─────────────────
+//
+// The exemption has two halves and BOTH are required. A 2xx answered on a branch
+// that recognises a specific error is discrimination, not swallowing — but only
+// when the catch also has a way out that does not answer 2xx. A catch whose
+// every exit is a guarded 2xx swallows what the guard matches and what it does
+// not, and stays reported.
+
+/** A webhook handler around `body`, as the catch block of a Stripe route. */
+const handler = (body, binding = '(err)') =>
+  [
+    'export async function POST(req) {',
+    '  try {',
+    '    await stripe.webhooks.constructEvent(await req.text(), sig, secret);',
+    `  } catch ${binding} {`,
+    ...body.map((l) => `    ${l}`),
+    '  }',
+    '}',
+  ].join('\n');
+
+const scan = (body, binding) =>
+  check({ path: 'app/api/stripe/webhook/route.ts', content: handler(body, binding) });
+
+test('a 2xx guarded by a test on the caught error, with a fall-through, is silent', () => {
+  // The idempotency pattern, in the four spellings that actually get written.
+  const guarded = {
+    'property compare': ["if (err.code === 'P2002') return NextResponse.json({ dup: true });", 'log(err);'],
+    instanceof: ['if (err instanceof DuplicateError) return NextResponse.json({ dup: true });', 'log(err);'],
+    'name compare': ["if (err.name === 'AlreadyProcessed') res.json({ dup: true });", 'log(err);'],
+    'helper on the error': ['if (isDuplicate(err)) { res.status(200).json({ dup: true }); return; }', 'log(err);'],
+    'else-if arm': [
+      "if (err.code === 'P2001') { log(err); }",
+      "else if (err.code === 'P2002') { return NextResponse.json({ dup: true }); }",
+    ],
+    switch: [
+      'switch (err.code) {',
+      "  case 'P2002': return NextResponse.json({ dup: true });",
+      '  default: log(err);',
+      '}',
+    ],
+    ternary: ["err.code === 'P2002' ? res.json({ dup: true }) : log(err);"],
+  };
+  for (const [label, body] of Object.entries(guarded)) {
+    assert.deepEqual(scan(body), [], `${label}: a discriminating catch was reported`);
+  }
+});
+
+test('a destructured binding is followed into the condition', () => {
+  assert.deepEqual(
+    scan(["if (code === 'P2002') return NextResponse.json({ dup: true });", 'log(code);'], '({ code })'),
+    []
+  );
+});
+
+test('a guarded 2xx whose catch has NO other way out is still reported', () => {
+  // Both halves of the test, one failing each way. Every one of these answers
+  // 2xx on every path the guard can take, so the guard exempts nothing.
+  const swallows = {
+    'both arms 2xx': [
+      "if (err.code === 'P2002') { return NextResponse.json({ dup: true }); }",
+      'return NextResponse.json({ received: true });',
+    ],
+    'guard then unconditional 2xx': [
+      "if (err.code === 'P2002') res.json({ dup: true });",
+      'else res.json({ received: true });',
+    ],
+    'guarded 2xx, unconditional bare return': [
+      "if (err.code === 'P2002') { return res.json({ dup: true }); }",
+      'log(err);',
+      'return;',
+    ],
+  };
+  for (const [label, body] of Object.entries(swallows)) {
+    assert.equal(scan(body).length, 1, `${label}: the swallow was exempted`);
+  }
+});
+
+test('a condition that does not inspect the caught error exempts nothing', () => {
+  // `retries` is not the binding, so this is not discrimination — it is a 2xx
+  // answered on a condition that has nothing to do with which error occurred.
+  assert.equal(scan(['if (retries > 3) return NextResponse.json({ ok: true });', 'log(err);']).length, 1);
+  // `catch {}` binds nothing, so nothing can be shown to inspect the error.
+  assert.equal(
+    scan(["if (e.code === 'P2002') return NextResponse.json({ ok: true });", 'log(e);'], '').length,
+    1
+  );
+});
+
+test('`if (err)` is not discrimination — it is always true inside a catch', () => {
+  for (const cond of ['if (err)', 'if (!err)', 'if ( err )']) {
+    assert.equal(
+      scan([`${cond} return NextResponse.json({ ok: true });`, 'log(err);']).length,
+      1,
+      `${cond} was accepted as a guard`
+    );
+  }
+});
+
+test('the binding must be named on the CODE channel, not in a string or comment', () => {
+  // The guard reads masked text, so a condition that only mentions `err` inside
+  // a literal or a comment is not a condition on the error.
+  const inString = ["if (label === 'err') return NextResponse.json({ ok: true });", 'log(err);'];
+  assert.equal(scan(inString).length, 1, 'a string mentioning the binding acted as a guard');
+  const inComment = ['if (flag /* err */) return NextResponse.json({ ok: true });', 'log(err);'];
+  assert.equal(scan(inComment).length, 1, 'a comment mentioning the binding acted as a guard');
+});
+
+test('an unguarded 2xx is reported even when a guarded one sits above it', () => {
+  const findings = scan([
+    "if (err.code === 'P2002') { return NextResponse.json({ dup: true }); }",
+    'log(err);',
+    'res.json({ received: true });',
+  ]);
+  assert.equal(findings.length, 1);
+  assert.deepEqual(findings[0].fix.remove, ['res.json({ received: true });']);
+});
+
+test('a non-2xx answer elsewhere in the catch is the other way out', () => {
+  // A catch that returns 500 for everything it did not recognise: the provider
+  // retries, nothing is lost, and the guarded 200 is correct.
+  assert.deepEqual(
+    scan([
+      "if (err.code === 'P2002') return NextResponse.json({ dup: true });",
+      "return NextResponse.json({ error: 'failed' }, { status: 500 });",
+    ]),
+    []
+  );
+  // …and so is handing the error to Express error middleware.
+  assert.deepEqual(
+    scan(["if (err.code === 'P2002') return res.json({ dup: true });", 'return next(err);']),
+    []
+  );
+});
+
+test('the exemption stops where the README says it stops', () => {
+  // Three shapes the guard cannot read, pinned so the code and the "Known
+  // limitations" section cannot drift apart. Each is a MISS, each applies only
+  // to a 2xx that is already guarded, and the fourth case is the counterweight:
+  // an unconditional 2xx in the same block is reported whatever the guard does.
+  assert.deepEqual(
+    scan(['if (err.code === "X") { log(err); }', 'else { return res.json({ ok: true }); }']),
+    [],
+    'the else arm of an error-inspecting if is exempted — documented miss'
+  );
+  assert.deepEqual(
+    scan(['if (err.code === "X") { return res.json({ dup: true }); }', 'for (const x of xs) { if (x) return; }']),
+    [],
+    'a return nested in a loop reads as "control falls out" — documented miss'
+  );
+  assert.equal(
+    scan(['isDup(err) && res.json({ dup: true });']).length,
+    1,
+    'a && short-circuit is not a guard and must stay reported'
+  );
+  assert.equal(
+    scan(['if (err.code === "X") { return res.json({ dup: true }); }', 'res.json({ ok: true });']).length,
+    1
+  );
+});
+
+// ── fix #2: response objects and terminal methods ───────────────────────────
+
+test('Fastify: reply.code(2xx).send() and a bare reply.send() are swallows', () => {
+  for (const line of [
+    'reply.code(204).send();',
+    'reply.status(202).send();',
+    'reply.send();',
+    'return reply.code(200).send({ ok: true });',
+  ]) {
+    assert.equal(scan([line]).length, 1, `${line} was not read as a 2xx`);
+  }
+  // A non-2xx code on the same chain is correct and stays silent.
+  for (const line of ['reply.code(500).send();', 'reply.status(400).send({ e: 1 });']) {
+    assert.deepEqual(scan([line]), [], `${line} was reported`);
+  }
+});
+
+test('the terminal methods that imply 200, on every receiver in the list', () => {
+  for (const line of [
+    'res.end();',
+    'res.sendStatus(202);',
+    'response.send({ ok: true });',
+    'resp.end();',
+    'ctx.json({ ok: true });',
+  ]) {
+    assert.equal(scan([line]).length, 1, `${line} was not read as a 2xx`);
+  }
+  assert.deepEqual(scan(['res.sendStatus(500);']), []);
+});
+
+test('the receiver list is explicit — an ordinary call is not a response', () => {
+  // "any identifier + .send(" would report every one of these.
+  for (const line of ['logger.send(err);', 'queue.end();', 'metrics.json({ err });', 'span.end();']) {
+    assert.deepEqual(scan([line]), [], `${line} was read as an HTTP response`);
+  }
+});
+
+test('reading a fetch body in a catch is not answering the provider', () => {
+  // `.text()` is how a fetch response body is read, and `response`/`resp` are
+  // what a fetch result gets called. Both spellings below are correct code.
+  for (const line of [
+    'const detail = await response.text();',
+    'const body = await resp.json();',
+    'const data = await response.json();',
+  ]) {
+    assert.deepEqual(scan([line]), [], `${line} was reported as a response`);
+  }
+});
+
+test('Hono: c.text/c.html/c.body count only in a file that imports hono', () => {
+  const honoRoute = (line) =>
+    [
+      "import { Hono } from 'hono';",
+      'const app = new Hono();',
+      "app.post('/webhook', async (c) => {",
+      '  try {',
+      '    await stripe.webhooks.constructEvent(await c.req.text(), sig, secret);',
+      '  } catch (err) {',
+      `    ${line}`,
+      '  }',
+      '});',
+    ].join('\n');
+  for (const line of ["return c.text('ok');", "return c.html('<b>ok</b>');", 'return c.body(null);', 'return c.json({ ok: true });']) {
+    assert.equal(
+      check({ path: 'app/webhook.ts', content: honoRoute(line) }).length,
+      1,
+      `${line} was not read as a Hono response`
+    );
+  }
+  // Hono's status is POSITIONAL, and a correctly-written failure answer must
+  // stay silent — C1 measured 67 false positives on a real repo from missing it.
+  for (const line of ["return c.json({ error: 'failed' }, 500);", "return c.text('nope', 400);"]) {
+    assert.deepEqual(check({ path: 'app/webhook.ts', content: honoRoute(line) }), [], line);
+  }
+  // Without the import, `c` is not a response object and `.text()` is a read.
+  const noImport = handler(["const detail = await c.text();", 'log(err);']);
+  assert.deepEqual(check({ path: 'app/api/stripe/webhook/route.ts', content: noImport }), []);
+});
+
 // ── the shared lexer ────────────────────────────────────────────────────────
 //
 // Both detectors read one character classification, and until this round it did
@@ -579,20 +883,31 @@ test('clause (2) manufactures no findings in ordinary code', () => {
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
 
-test('CLI --json on the webhook fixtures reports exactly the two positives', () => {
+test('CLI --json on the webhook fixtures reports exactly the seven positives', () => {
   const r = runCli([FIXTURES, '--json']);
   assert.equal(r.status, 1); // critical findings, default threshold high
 
   const payload = JSON.parse(r.stdout); // throws if the JSON is invalid
   assert.equal(payload.schemaVersion, 1);
-  assert.equal(payload.summary.total, 2);
-  assert.equal(payload.summary.critical, 2);
+  // Two hand-written fixtures plus the five BAD cases of the adopted C1
+  // fixture. Its four GOOD cases are the other half of the number: a total of
+  // 7 rather than 11 is the assertion that they stayed silent.
+  assert.equal(payload.summary.total, 7);
+  assert.equal(payload.summary.critical, 7);
   assert.equal(payload.summary.high, 0);
-  assert.equal(payload.scan.filesScanned, 4);
+  assert.equal(payload.scan.filesScanned, 5);
   assert.ok(payload.scan.durationMs >= 0);
 
   const files = payload.findings.map((f) => f.file).sort();
-  assert.deepEqual(files, ['app/api/stripe/webhook/route.ts', 'github-webhook.mjs']);
+  assert.deepEqual(files, [
+    'app/api/stripe/webhook/route.ts',
+    'github-webhook.mjs',
+    'webhook-examples.ts',
+    'webhook-examples.ts',
+    'webhook-examples.ts',
+    'webhook-examples.ts',
+    'webhook-examples.ts',
+  ]);
   for (const f of payload.findings) {
     assert.equal(f.rule, rule);
     assert.equal(f.severity, 'critical');
@@ -603,7 +918,7 @@ test('CLI --json on the webhook fixtures reports exactly the two positives', () 
 test('CLI --fail-on never reports findings but exits 0', () => {
   const r = runCli([FIXTURES, '--json', '--fail-on', 'never']);
   assert.equal(r.status, 0);
-  assert.equal(JSON.parse(r.stdout).summary.total, 2);
+  assert.equal(JSON.parse(r.stdout).summary.total, 7);
 });
 
 test('CLI exits 2 on a nonexistent path', () => {

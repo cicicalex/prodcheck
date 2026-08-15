@@ -32,8 +32,9 @@
 
 import * as webhookSwallows from './webhook-swallows-2xx.mjs';
 import * as rateLimitBypass from './rate-limit-bypass.mjs';
+import * as envSecretFallback from './env-secret-fallback.mjs';
 
-export const checks = [webhookSwallows, rateLimitBypass];
+export const checks = [webhookSwallows, rateLimitBypass, envSecretFallback];
 
 /**
  * How many of the seven-rule design are NOT in `checks` above. The report
@@ -41,10 +42,21 @@ export const checks = [webhookSwallows, rateLimitBypass];
  * checks" — so the arithmetic has to hold: `checks.length + LOCKED_PAID_CHECKS`
  * is the size of the design, and every rule is in exactly one of the two.
  *
- * Two ship (both MIT, both in this array). Five do not exist yet:
+ * Three ship (all MIT, all in this array). Four do not exist yet:
  * 2fa-skips-api, account-delete-blocked, migrations-not-replayable,
- * backup-unencrypted, quota-per-key. This was 4 while the README also claimed
- * three shipped free — 3 + 4 = 7 was the only true statement in the pair, and
- * the code disagreed with it. Appending a check here means decrementing this.
+ * backup-unencrypted.
+ *
+ * `env-secret-fallback` is the third to ship and it did not come free: the
+ * design is SEVEN, so something had to leave the unimplemented list for it to
+ * join this array. That was `quota-per-key` (usage metered on `api_key_id`
+ * rather than `user_id`), and the swap is recorded here and in the README's
+ * table rather than absorbed silently — the two lists have to name the same
+ * seven rules or the upsell row is a lie. Reversing it means restoring
+ * quota-per-key to the README table and deciding which of the four steps aside.
+ *
+ * The subtraction above is what keeps that bookkeeping to one place. The count
+ * was once written down as a literal 4, while the README claimed three shipped
+ * free — 3 + 4 = 7 was the only true statement in the pair, and the code
+ * disagreed with it. Appending a check here now needs no second edit.
  */
 export const LOCKED_PAID_CHECKS = 7 - checks.length;

@@ -2518,7 +2518,7 @@ test('a constant holding an ORDINARY header name admits nothing', () => {
 test('registry lists the rules in rule-table order', () => {
   assert.deepEqual(
     checks.map((c) => c.rule),
-    ['webhook-swallows-2xx', 'rate-limit-bypass']
+    ['webhook-swallows-2xx', 'rate-limit-bypass', 'env-secret-fallback']
   );
 });
 
@@ -2533,10 +2533,13 @@ test('registry entries all expose the same check surface', () => {
 
 test('the upsell arithmetic is true: shipping + locked is the whole design', () => {
   // The report's "→ N more checks" row is a claim about how many rules exist
-  // beyond the ones that just ran. Two ship, so five are outstanding — not four,
-  // which was the number when the README also claimed three shipped.
-  assert.equal(checks.length, 2);
-  assert.equal(LOCKED_PAID_CHECKS, 5);
+  // beyond the ones that just ran. Three ship, so four are outstanding — the
+  // number moved when env-secret-fallback was appended, and it moved by itself,
+  // because LOCKED_PAID_CHECKS is derived from `checks.length` rather than
+  // written down. It WAS written down once, as 4 while the README claimed three
+  // shipped free, and the two disagreed for a release.
+  assert.equal(checks.length, 3);
+  assert.equal(LOCKED_PAID_CHECKS, 4);
   assert.equal(checks.length + LOCKED_PAID_CHECKS, 7);
 });
 
@@ -2634,6 +2637,15 @@ test('CLI aggregates both rules in a single scan of the fixture tree', () => {
     'webhook-swallows-2xx': [
       { file: 'webhook/app/api/stripe/webhook/route.ts', line: 12, severity: 'critical' },
       { file: 'webhook/github-webhook.mjs', line: 6, severity: 'critical' },
+      // The five BAD cases of the acceptance fixture adopted from C1, at the
+      // line of each `catch`. Its four GOOD cases contribute nothing, which is
+      // the half of this list that matters: good5 is the conditional-idempotency
+      // pattern taken from real production code, and it used to be reported.
+      { file: 'webhook/webhook-examples.ts', line: 37, severity: 'critical' },
+      { file: 'webhook/webhook-examples.ts', line: 48, severity: 'critical' },
+      { file: 'webhook/webhook-examples.ts', line: 59, severity: 'critical' },
+      { file: 'webhook/webhook-examples.ts', line: 70, severity: 'critical' },
+      { file: 'webhook/webhook-examples.ts', line: 81, severity: 'critical' },
     ],
     'rate-limit-bypass': [
       { file: 'ratelimit/ancestor-scope-rescue.js', line: 27, severity: 'medium' },
@@ -2671,6 +2683,18 @@ test('CLI aggregates both rules in a single scan of the fixture tree', () => {
       { file: 'ratelimit/socket-override.js', line: 11, severity: 'medium' },
       { file: 'ratelimit/ternary-validated.js', line: 20, severity: 'medium' },
       { file: 'ratelimit/trust-words-in-string.js', line: 23, severity: 'high' },
+    ],
+    // Rule #3's whole contribution to the tree, and the shape of the block a
+    // rule #4 adds: seven fixtures, three findings. The other four fixtures are
+    // the SILENT half — an empty fallback, `PORT`/`NODE_ENV`, the offending
+    // line quoted in a comment, and a read with an explicit throw — and their
+    // absence from this list is the assertion that matters most, because a
+    // version of this rule that reported `process.env.PORT || 3000` would be
+    // switched off before it found anything.
+    'env-secret-fallback': [
+      { file: 'envsecret/high-destructured-default.ts', line: 10, severity: 'high' },
+      { file: 'envsecret/high-fetch-fallback.ts', line: 10, severity: 'high' },
+      { file: 'envsecret/medium-no-outbound.js', line: 13, severity: 'medium' },
     ],
   };
 

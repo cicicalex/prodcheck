@@ -56,7 +56,7 @@ const result = {
   findings: clean ? [] : findings,
   filesScanned: 340,
   durationMs: 1200,
-  lockedChecks: 5,
+  lockedChecks: 4,
 };
 
 if (argv.includes('--help') || argv.includes('-h')) {
