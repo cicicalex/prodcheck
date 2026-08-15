@@ -106,6 +106,35 @@ const PATH_HINT = /webhook|hook/i;
  */
 const CONTENT_HINT = /stripe\.webhooks|constructEvent|svix|webhook/i;
 
+/**
+ * The bare word `webhook` is only a hint when it reads as a ROUTE, not as prose.
+ *
+ * Keeping strings was deliberate and stays deliberate: Express registers webhooks
+ * as string paths, and stripping strings would blind the rule to exactly those
+ * files. But "keep strings" was implemented as "match the word anywhere", and a
+ * sentence is a string too. Found by dogfooding on `zero-point-logic` `main`:
+ *
+ *     `webhook resolves plans through the same map, so these customers ...`
+ *
+ * — one prose line inside a template literal made `api/admin/revenue/route.ts`
+ * a webhook candidate, and its perfectly reasonable 200-with-zeros fallback was
+ * reported CRITICAL. Isolated by deleting one word at a time: removing it from
+ * the string cleared the finding; removing it from the two comments did not.
+ *
+ * A route reads as a path segment — bounded by a slash, a quote, or a separator
+ * — never as a word mid-sentence. That is the whole distinction, and it keeps
+ * every registration form the rule was built for:
+ *
+ *     app.post('/webhook', ...)         '/webhooks/stripe'      "webhook"
+ *     router.post(`/api/webhook`, ...)  '/hooks/github'
+ *
+ * The three strong hints — `stripe.webhooks`, `constructEvent`, `svix` — are
+ * unambiguous on their own and are NOT narrowed: they cannot appear in prose by
+ * accident.
+ */
+const WEBHOOK_AS_ROUTE = /(?:^|[/'"`\s([,=])(?:web)?hooks?(?:[/'"`?)\],;]|$)/i;
+const STRONG_HINT = /stripe\.webhooks|constructEvent|svix/i;
+
 const IMPACT =
   'The catch block returns a 2xx without re-throwing, so the webhook provider ' +
   'marks the event delivered and never retries. The failed event is silently ' +
@@ -174,7 +203,10 @@ const HONO_IMPORT = /(?:\bfrom|\brequire\s*\(\s*)\s*['"]hono(?:\/[\w./-]*)?['"]/
 const ERROR_ESCAPES = /\bnext\s*\(\s*[^)\s]|\breject\s*\(|\bprocess\s*\.\s*exit\s*\(/;
 
 export function isCandidate(relPath, content) {
-  return PATH_HINT.test(relPath) || CONTENT_HINT.test(stripComments(content));
+  if (PATH_HINT.test(relPath)) return true;
+  const code = stripComments(content);
+  // A strong hint is decisive on its own; the bare word has to read as a route.
+  return STRONG_HINT.test(code) || WEBHOOK_AS_ROUTE.test(code);
 }
 
 /** `src` with every not-code character blanked (newlines kept for line math). */

@@ -18,7 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { check, rule } from '../src/checks/webhook-swallows-2xx.mjs';
+import { check, rule, isCandidate } from '../src/checks/webhook-swallows-2xx.mjs';
 // The clause-(2) reproducers below assert a FINDING rather than a mask bit, and
 // the rate-limit rule is where the three mechanisms were measured silencing
 // real production bugs, so both detectors are needed here.
@@ -209,6 +209,63 @@ test('a destructured binding is followed into the condition', () => {
     scan(["if (code === 'P2002') return NextResponse.json({ dup: true });", 'log(code);'], '({ code })'),
     []
   );
+});
+
+// ── candidacy: the bare word has to read as a route, not as prose ────────────
+//
+// Keeping strings in the content hint was deliberate — Express registers
+// webhooks as string paths, and stripping strings would blind the rule to
+// exactly those files. But "keep strings" had been implemented as "match the
+// word anywhere", and a sentence is a string too.
+//
+// Found by dogfooding on the live site: one prose line inside a template
+// literal made an admin dashboard route a webhook candidate, and its ordinary
+// 200-with-zeros fallback was reported CRITICAL. Isolated by deleting one word
+// at a time — removing it from the string cleared the finding, removing it from
+// the two comments did not.
+//
+// This fix NARROWS candidacy, which is the direction that can go quiet without
+// anyone noticing. The first test below is the one that matters.
+
+test('every real webhook registration is still a candidate', () => {
+  // The whole risk of narrowing. If any of these stops matching, the rule has
+  // gone blind to the shape it exists for.
+  const registrations = {
+    'express single-quoted': `app.post('/webhook', handler);`,
+    'express with prefix': `app.post('/api/webhooks/stripe', handler);`,
+    'router template literal': 'router.post(`/api/webhook`, handler);',
+    'double-quoted bare': `const route = "webhook";`,
+    'plural path': `app.post('/webhooks', handler);`,
+    'github hooks path': `app.post('/hooks/github', handler);`,
+    'path with query': `fetch('/webhook?verify=1');`,
+    'array of routes': `const routes = ['/webhook', '/health'];`,
+    'strong hint — constructEvent': `const evt = stripe.webhooks.constructEvent(body, sig, secret);`,
+    'strong hint — svix': `import { Webhook } from 'svix';`,
+  };
+  for (const [label, content] of Object.entries(registrations)) {
+    assert.equal(isCandidate('app/api/anything/route.ts', content), true, `${label}: no longer a candidate`);
+  }
+});
+
+test('the word in prose does not make a file a webhook', () => {
+  const prose = {
+    'template literal sentence': [
+      'const note = `webhook resolves plans through the same map, so these',
+      '  customers are being counted twice`;',
+    ].join('\n'),
+    'plain string sentence': `const msg = "the webhook writes this row, the admin view reads it";`,
+    'comment only': `// what a subscription IS — checkout writes it, the webhook reads it`,
+    'word inside an identifier': `const webhookish = computeThing();`,
+  };
+  for (const [label, content] of Object.entries(prose)) {
+    assert.equal(isCandidate('app/api/admin/revenue/route.ts', content), false, `${label}: still a candidate`);
+  }
+});
+
+test('a webhook path keeps its candidacy regardless of content', () => {
+  // PATH_HINT is independent and untouched: a file under a webhook route is a
+  // candidate even if its body never says the word.
+  assert.equal(isCandidate('app/api/stripe/webhook/route.ts', 'export async function POST() {}'), true);
 });
 
 // ── narrowing through a local ────────────────────────────────────────────────
