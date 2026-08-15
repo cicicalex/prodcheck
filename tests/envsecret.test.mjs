@@ -109,6 +109,34 @@ test('SILENT: the offending line in a comment, or in a string, is not code', () 
   assert.deepEqual(detect('silent-in-comment.js'), []);
 });
 
+test('SILENT: a build tool that declares the value public settles the question', () => {
+  // This is the measured false positive, not an invented case. The shipped rule
+  // reported three MEDIUMs on zpl-finance's `sentry.*.config.ts`, each of the
+  // shape `process.env.NEXT_PUBLIC_SENTRY_DSN ?? "https://…ingest.sentry.io/…"`.
+  // `DSN` passes SECRET_NAME and is not a location suffix, so the gates fired
+  // correctly and the answer was still wrong: Next.js inlines every
+  // `NEXT_PUBLIC_*` value into the browser bundle, so the literal is public by
+  // construction and neither consequence the finding claims can follow.
+  assert.deepEqual(detect('silent-public-prefix.ts'), []);
+});
+
+test('the exemption is on the prefix, not on the rest of the name', () => {
+  // `SENTRY_DSN` without the prefix still reports — the guarantee comes from the
+  // build tool, not from the word `DSN`. Exempting `DSN` outright would silence
+  // a server-side default too, where the same literal is a real (if low-value)
+  // fallback. Inline sources so the pair differs by the prefix alone.
+  const withPrefix = check({
+    path: 'a.ts',
+    content: 'export const d = process.env.NEXT_PUBLIC_SENTRY_DSN ?? "https://k@o1.ingest.sentry.io/2";\n',
+  });
+  const without = check({
+    path: 'b.ts',
+    content: 'export const d = process.env.SENTRY_DSN ?? "https://k@o1.ingest.sentry.io/2";\n',
+  });
+  assert.deepEqual(withPrefix, []);
+  assert.equal(without.length, 1);
+});
+
 test('CLEAN: read once, throw when missing — no fallback to judge', () => {
   assert.deepEqual(detect('clean-explicit-throw.js'), []);
 });
@@ -413,10 +441,11 @@ test('CLI --json on the envsecret fixtures reports exactly the two HIGHs', () =>
   assert.equal(payload.summary.high, 2);
   assert.equal(payload.summary.medium, 1);
   assert.equal(payload.summary.critical, 0);
-  // Seven fixtures, four of which are the silent half of the rule. That the
+  // Eight fixtures, five of which are the silent half of the rule. That the
   // count of files is more than double the count of findings is the assertion
-  // that matters most here.
-  assert.equal(payload.scan.filesScanned, 7);
+  // that matters most here — and the fifth silent case is the one measured on
+  // real code: a `NEXT_PUBLIC_*` value the build tool already published.
+  assert.equal(payload.scan.filesScanned, 8);
 
   assert.deepEqual(
     payload.findings.map((f) => `${f.file}:${f.line}:${f.severity}`),

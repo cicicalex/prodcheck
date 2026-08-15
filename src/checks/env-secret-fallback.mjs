@@ -215,6 +215,37 @@ const LOCATION_SUFFIX = new Set([
 ]);
 
 /**
+ * Prefixes by which a build tool DECLARES a variable public.
+ *
+ * These are not a heuristic like SECRET_NAME — they are a contract. Next.js
+ * inlines every `NEXT_PUBLIC_*` value into the browser bundle at build time;
+ * Vite does the same for `VITE_*`, Create React App for `REACT_APP_*`,
+ * SvelteKit and Astro for `PUBLIC_*`. A value shipped to every visitor cannot
+ * be a credential, whatever the rest of its name says.
+ *
+ * This closes a false positive measured on real code:
+ *
+ *     dsn: process.env.NEXT_PUBLIC_SENTRY_DSN ?? "https://…@…ingest.sentry.io/…"
+ *
+ * `DSN` passes SECRET_NAME and is not a LOCATION_SUFFIX, so the rule reported
+ * it — correctly by its own gates, and wrongly in fact. A Sentry DSN is a
+ * write-only ingest endpoint, the literal is the project's own, and the prefix
+ * says it is already public. Neither consequence the finding claims — someone
+ * authenticating as you, a bill on your account — can follow from it.
+ *
+ * The gate is on the PREFIX, not on `DSN`, deliberately. Exempting `DSN` would
+ * also silence `SENTRY_DSN` in a server file, where the same literal is a real
+ * (if low-value) default. The prefix is the part that carries the guarantee.
+ *
+ * Cost, stated rather than hidden: a genuine secret misnamed with a public
+ * prefix — `NEXT_PUBLIC_STRIPE_SECRET_KEY` — is now a miss. That variable is
+ * already compromised by its own name, since the build tool has published it;
+ * a scanner reporting the fallback would be pointing at the smaller of two
+ * problems.
+ */
+const PUBLIC_PREFIX = /^(?:NEXT_PUBLIC|VITE|REACT_APP|PUBLIC|EXPO_PUBLIC|GATSBY|NUXT_PUBLIC)_/i;
+
+/**
  * The last segment of an environment variable name, upper-cased.
  *
  * Splits on `_`, `-` and `.`, and on camel humps first, so `AUTH_URL`,
@@ -229,6 +260,7 @@ function lastSegment(name) {
 
 /** Does this variable name read as a credential rather than as configuration? */
 function isSecretName(name) {
+  if (PUBLIC_PREFIX.test(name)) return false;
   return SECRET_NAME.test(name) && !LOCATION_SUFFIX.has(lastSegment(name));
 }
 
