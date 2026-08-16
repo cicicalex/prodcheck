@@ -450,8 +450,9 @@ function branchEnd(text, i) {
  *     }
  *
  * The direct form was recognised and this one was not, which means the shape
- * that appears MOST in real TypeScript was the shape reported. Found by C1
- * running `45fc147` against `zpl-finance`; the suite was green at 449 tests the
+ * that appears MOST in real TypeScript was the shape reported. Found by running
+ * an earlier build against a real Next.js repository; the suite was green at
+ * 449 tests the
  * whole time, and it took real code to surface it — the same argument this
  * check was built on, pointed back at it.
  *

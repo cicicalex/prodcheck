@@ -5,9 +5,9 @@
  * literal — `process.env.FMP_API_KEY ?? 'demo'` — in a file that then calls out
  * to the internet.
  *
- * This rule exists because of one line in the author's own code:
+ * This rule exists because of one line in the author's own code — a health-check
+ * route in a private repository:
  *
- *     zpl-finance/src/app/api/health-check/route.ts
  *     const key = process.env.FMP_API_KEY || 'demo';
  *
  * The FMP key was deleted when the account was cancelled. Nothing broke.
@@ -171,10 +171,11 @@ const SECRET_NAME =
  * Words that make a name a LOCATION rather than a credential, tested against
  * the name's LAST segment only.
  *
- * This exists because of one measurement. On `zpl-finance` — 421 files, the
+ * This exists because of one measurement. On a 421-file Next.js codebase — the
  * repository this rule was built from — the first version of the rule produced
- * 9 findings, and 6 of them were `process.env.AUTH_URL ?? "https://finance.
- * zeropointlogic.io"`, in five different files. `AUTH_URL` is NextAuth's
+ * 9 findings, and 6 of them were
+ * `process.env.AUTH_URL ?? "<the site's own origin>"`, in five different files.
+ * `AUTH_URL` is NextAuth's
  * standard variable name; it holds the site's own origin, it is not a secret,
  * and defaulting it to the production URL is deliberate and correct. It matched
  * only because `AUTH` is a substring of `AUTH_URL`.

@@ -453,7 +453,7 @@ Measured, across 517 files in four repositories: no scan needs a repair at all,
 and the disputed-`/` clause moves 2,375 characters from the data channel to the
 code channel in 31 of them, changing no finding — nothing added and nothing
 removed, here or on the 105-file adversarial fixture corpus. The largest single
-case is `zpl-finance/src/app/dashboard/layout.tsx` at 826 characters — five
+case is a dashboard layout at 826 characters — five
 inline SVG icons, where two `<rect … />` on one line make the `/` of the first
 `/>` a refused regex whose span reaches the second, with the attribute strings
 of the second tag inside it. In 57,747 files under those repositories'
@@ -723,8 +723,8 @@ that is switched off the same day.
 **One over-report was too common to leave standing, and the last segment of the
 name now vetoes the match.** `AUTH_URL` is NextAuth's own variable name, it
 holds an origin rather than a credential, and defaulting it to the production
-URL is deliberate. On the first run against `zpl-finance` it was **six of nine
-findings, across five files**, purely because `AUTH` is a substring of
+URL is deliberate. On the first run against a real Next.js codebase it was **six
+of nine findings, across five files**, purely because `AUTH` is a substring of
 `AUTH_URL`. So a name ending in `URL`, `URI`, `ENDPOINT`, `HOST`, `HOSTNAME`,
 `DOMAIN`, `ORIGIN`, `PATH`, `DIR`, `PORT` or `REGION` is configuration however
 its earlier segments read — while `URL_SECRET` and `ENDPOINT_API_KEY` are still

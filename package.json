@@ -1,6 +1,6 @@
 {
   "name": "prodcheck",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Finds the production bugs that ship green — swallowed webhooks, bypassable rate limits, blocked account deletion. A Zero Point Logic tool.",
   "author": "Ciciu Alexandru-Costinel <contact@zeropointlogic.io> (https://zeropointlogic.io)",
   "homepage": "https://zeropointlogic.io",

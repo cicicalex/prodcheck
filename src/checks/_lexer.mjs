@@ -121,7 +121,7 @@
  * characters the mask calls not-code, so the file reported clean.
  *
  * This is not a hypothetical. Scanning 513 real files in this author's own
- * repositories found `zpl-finance/src/lib/csv-export.ts` dark from line 11 to
+ * repositories found a CSV export module dark from line 11 to
  * EOF, caused by nothing more adversarial than CSV quoting:
  *
  *     `"${str.replace(/"/g, '""')}"`
@@ -242,7 +242,7 @@
  * 31 of them, moving 2,375 characters from the data channel to the code
  * channel and 0 characters the other way, and the finding set does not change
  * at all — nothing added, nothing removed, on those 517 files or on the
- * 105-file adversarial fixture corpus. `zpl-finance/src/app/dashboard/layout.tsx`
+ * 105-file adversarial fixture corpus. A dashboard layout
  * — five inline SVG icons of `<rect … />` and `<path … />` — is the largest
  * single case at 826 characters, in one run of 732.
  *
