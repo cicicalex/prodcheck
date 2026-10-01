@@ -3,7 +3,14 @@
   "version": "1.0.0",
   "description": "Finds the production bugs that ship green — swallowed webhooks, bypassable rate limits, blocked account deletion. A Zero Point Logic tool.",
   "author": "Ciciu Alexandru-Costinel <contact@zeropointlogic.io>",
-  "homepage": "https://www.npmjs.com/package/@zeropointlogic/prodcheck",
+  "homepage": "https://github.com/cicicalex/prodcheck#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cicicalex/prodcheck.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cicicalex/prodcheck/issues"
+  },
   "publishConfig": {
     "access": "public"
   },
