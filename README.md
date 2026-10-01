@@ -8,13 +8,15 @@ still swallows a failed payment because the `catch` block returns 200.
 other tool in your pipeline.
 
 ```bash
-# Not published yet — `npm view prodcheck` is a 404 today. This is what the
-# install will be, and it does not work until the package ships:
-npx prodcheck .
+npx @zeropointlogic/prodcheck .         # scan the current directory
+npx @zeropointlogic/prodcheck ~/my-app  # or any other path
 
-# What runs today, from a checkout of this repository:
-node src/cli.mjs .              # scan the current directory
-node src/cli.mjs ~/my-app       # or any other path
+# Or install it once; the command is then just `prodcheck`:
+npm install -g @zeropointlogic/prodcheck
+prodcheck .
+
+# From a checkout of this repository:
+node src/cli.mjs .
 ```
 
 No config, no account, no telemetry. Reads your code, prints what is wrong and
