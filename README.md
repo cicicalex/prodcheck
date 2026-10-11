@@ -412,6 +412,143 @@ Severity is never carried by colour alone: each level has its own ASCII glyph
 (`!!`, `!`, `~`, `-`), so the report stays readable in CI logs, when piped to a
 file, and for colourblind readers.
 
+## Gate of gates: proving a check can fail
+
+A check that cannot fail proves nothing. This came from a real incident: a
+marker `cap=262144` was a hard-coded constant, three gates verified that
+constant, and so none of the three could ever go red. All three were green,
+and not one of them was checking anything.
+
+`src/gates/cli.mjs` checks the checks. For every check in a config file it:
+
+1. runs the check on a copy of the **unmodified** tree. It must pass, or the
+   check is reported **BROKEN BASELINE**: a check that is already red tells
+   you nothing about whether it can go red;
+2. runs it again once per **breaker**, each time on a fresh copy that has
+   been made wrong on purpose. It must **fail**, or the check is reported
+   **CANNOT FAIL**.
+
+Every run, the baseline included, happens in a temporary copy of the tree
+under the OS temp directory, which is deleted afterwards. Nothing runs in
+place. The original tree is hashed (SHA-256 over paths, modes and bytes)
+before and after the run, and a different hash fails the run.
+
+```bash
+node src/gates/cli.mjs                  # run ./gates.json
+node src/gates/cli.mjs ci/gates.json    # another config
+node src/gates/cli.mjs --json           # machine-readable, for CI
+node src/gates/cli.mjs --timeout 30000  # per-step timeout in ms, overrides the config
+node src/gates/cli.mjs --help
+```
+
+This repository has its own [`gates.json`](gates.json), which proves that the
+webhook detector's tests and the "published code scans clean" gate can both
+fail. `npm test` runs it.
+
+### Config
+
+JSON, so no dependency is needed to read it. Relative `patch` and
+`contentFrom` paths resolve against the config file's directory, and `replace`
+targets resolve against the tree root.
+
+```json
+{
+  "root": ".",
+  "timeoutMs": 120000,
+  "exclude": [".git"],
+  "checks": [
+    {
+      "name": "cap is computed",
+      "run": "node check-cap.mjs",
+      "timeoutMs": 30000,
+      "breakers": [
+        { "name": "patched",  "patch": "gates/cap-one.patch" },
+        { "name": "halved",   "replace": { "file": "src/config.mjs", "content": "export const config = { cap: 131072 };\n" } },
+        { "name": "from file","replace": { "file": "src/config.mjs", "contentFrom": "gates/bad-config.mjs" } },
+        { "name": "env",      "env": { "CAP_OVERRIDE": "1" } },
+        { "name": "setup",    "setup": "sed -i 's/262144/7/' src/config.mjs" }
+      ]
+    }
+  ]
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `root` | tree to copy, relative to the config file (default: the config's directory) |
+| `timeoutMs` | per-step timeout. Each setup command, patch and check run is one step (default 120000) |
+| `exclude` | entry names not copied or hashed, at any depth (default `[".git"]`) |
+| `checks[].run` | shell command, run from the copy's root. Exit 0 is pass, anything else is fail. Anything it leaves running in its process group is killed when it exits |
+| `breakers[].patch` | unified diff applied with `git apply` (`-p1`, so `a/` and `b/` prefixes) |
+| `breakers[].replace` | `{file, content}` or `{file, contentFrom}`, or an array of them. The file is created if missing and must stay inside the tree |
+| `breakers[].env` | extra environment variables for the setup command and the check |
+| `breakers[].setup` | shell command run in the copy before the check |
+
+A breaker can combine several kinds. They apply in the order patch, replace,
+setup, with `env` set throughout. A check with no breakers is a config error,
+because it is exactly the unproven gate this tool exists to reject.
+
+### Verdicts and exit codes
+
+Each breaker gets one of these outcomes:
+
+| Outcome | Meaning |
+| --- | --- |
+| `CAUGHT` | the check failed with the subject broken, which is the good outcome |
+| `CANNOT FAIL` | the check still passed with the subject broken |
+| `TIMEOUT` | the check hung with the breaker applied. It was killed and its whole process group with it. A hang is not counted as a catch |
+| `BREAKER ERROR` | the breaker itself could not be applied (stale patch, failing setup). This is not counted as a catch either |
+
+Each check gets one of these verdicts: `CAN FAIL` (every breaker `CAUGHT`),
+`CANNOT FAIL`, `BROKEN BASELINE` or `INCONCLUSIVE` (a timeout or breaker
+error, with nothing that cannot fail).
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | every check is `CAN FAIL` and the original tree is byte-identical |
+| `1` | anything else |
+| `2` | bad config, bad flag, or crash |
+
+Here is the incident, reproduced: one gate greps the hard-coded marker and one
+actually imports the value. Both pass, and only one of them can fail:
+
+```
+  !! CANNOT FAIL  marker says cap=262144
+     $ grep -q cap=262144 marker.txt
+     baseline: passes (10ms)
+     - CANNOT FAIL  cap halved (5ms)
+         check still passes with the subject broken
+
+  ok CAN FAIL  cap is computed
+     $ node check-cap.mjs
+     baseline: passes (36ms)
+     - CAUGHT  cap halved (69ms)
+
+  --------------------------------------------------------------------------
+  2 checks · 1 can fail · 1 cannot fail · 0.1s
+  original tree unchanged · sha256 3cde4835409923b2
+```
+
+### What it does not prove
+
+- **A `CAUGHT` check failed, but not necessarily for the right reason.** If
+  the breaker also stops the check from starting (say, a syntax error in a
+  file the test runner imports), the check fails and counts as caught. Write
+  breakers that make the subject *wrong*, not *unrunnable*.
+- **It proves the check can fail for the breakers you wrote, not for every
+  bug.** It is mutation testing with hand-picked mutants.
+- **Copies are full copies** (minus `exclude`), so a large `node_modules` is
+  copied once per run. Excluding it is faster, but then checks that need it
+  will fail on the baseline.
+- **Only POSIX is tested.** Commands run through `/bin/sh`, process-group
+  kill uses negative PIDs, and Windows is not covered.
+- **The original tree is protected, but nothing outside it is.** The checks
+  and setup commands run as you, with your environment. A setup command that
+  writes outside its working directory, or a check that talks to a real
+  service, is not sandboxed.
+- **A run killed with SIGKILL leaves its `prodcheck-gates-*` temp directory
+  behind.** Cleanup happens in a `finally`, and SIGKILL skips it.
+
 ## Known limitations
 
 The detectors are lexical passes, not full parsers — a deliberate trade-off to
