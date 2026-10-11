@@ -412,6 +412,164 @@ Severity is never carried by colour alone: each level has its own ASCII glyph
 (`!!`, `!`, `~`, `-`), so the report stays readable in CI logs, when piped to a
 file, and for colourblind readers.
 
+## Scanning built artifacts
+
+The checks above read source. Some leaks only exist in what the build
+produces: a build machine path such as `C:\Users\<name>\.rustup` once ended up
+inside every public ISO of a project, and no gate saw it, because every gate
+was pointed at the repository and none at the shipped bytes.
+`prodcheck artifacts` reads the shipped bytes.
+
+```bash
+node src/cli.mjs artifacts dist/                          # every file under dist/, recursively
+node src/cli.mjs artifacts os.iso tool-1.2.0.tgz          # specific artifacts
+node src/cli.mjs artifacts dist/ --json                   # machine-readable, for CI
+node src/cli.mjs artifacts dist/ --deny-terms ~/.config/prodcheck/deny.txt
+node src/cli.mjs artifacts dist/ --allow ci/artifact-allow.txt
+node src/cli.mjs artifacts --help                         # every flag, with its default
+```
+
+Below is the output of `node src/cli.mjs artifacts dist/ --no-color` over
+three generated artifacts: an ISO whose EFI binary carries a Rust panic
+location, an npm package, and a wheel. The npm package is clean, so it does not
+appear. User names and secrets are redacted in every output, the JSON too. A
+scanner that copies the leaked name into a public CI log has leaked it again.
+
+```
+  !  LEAK  windows-home-path
+     dist/os-1.2.iso!EFI/BOOTX64.EFI
+     offset 4271 (0x10af) · ascii
+     …rap()` on a `None` valueC:\Users\b***\.rustup\toolchains\stabl…
+
+  !  LEAK  email-address
+     dist/tool-1.2-py3-none-any.whl!tool/__init__.py
+     offset 11 (0xb) · ascii
+     # contact: r***@corp-mail.io.
+
+  --------------------------------------------------------------------------
+  2 findings · 3 artifacts · 12 objects · 0.1 MiB · 0.0s
+```
+
+The location is the artifact, then each entry inside it, joined with `!`. The
+offset is a byte offset inside the innermost entry, after decompression. Open
+that entry at that offset and you are looking at the leak.
+
+### What it reads
+
+Containers are recognised by their bytes, not their extension, and opened
+recursively up to `--max-depth` (default 10) levels:
+
+| Format | Read as |
+| --- | --- |
+| `.zip`, `.whl`, `.jar`, `.nupkg`, `.apk`, … | zip: stored and deflate entries, ZIP64 |
+| `.tar` | POSIX ustar, GNU long names, pax `path` |
+| `.tar.gz`, `.tgz`, npm packages, `.gz` | gzip, then whatever is inside |
+| `.iso` | ISO 9660, with Joliet names when present |
+| `.exe`, `.dll`, `.so`, anything else | raw bytes |
+
+Every object, container or not, is also scanned as raw bytes, in two
+encodings: 8-bit (ASCII and UTF-8, what `strings` finds) and UTF-16LE at both
+byte alignments (Windows resources, PE version info, .NET strings, Joliet
+names). For a container that raw pass covers what sits between the entries:
+zip and tar headers, a tar's `uname`, ISO directory records, appended data. A
+match already reported from inside an entry is not reported again.
+
+Nothing is extracted to disk and nothing is executed. Stored data (ISO files,
+tar members, stored zip entries) is read in place. Only decompression
+allocates, and each inflated entry is capped by `--max-inflate-mb` (default
+512).
+
+### What it looks for
+
+| Rule | Matches |
+| --- | --- |
+| `windows-home-path` | `C:\Users\<name>\`, also with `/` or escaped `\\` |
+| `unix-home-path` | `/home/<name>/`, `/Users/<name>/` |
+| `email-address` | an e-mail address |
+| `aws-access-key-id` | `AKIA…`/`ASIA…` and the other AWS key ID prefixes |
+| `aws-secret-access-key` | a 40-character value assigned to `aws_secret_access_key` |
+| `github-token` | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_` |
+| `private-key` | a PEM `BEGIN … PRIVATE KEY` header |
+| `jwt` | `eyJ….eyJ….…` |
+| `npm-token`, `slack-token`, `stripe-live-key`, `google-api-key` | those token shapes |
+| `deny-term` | any line of your `--deny-terms` file |
+
+Placeholders are not reported: `C:\Users\<name>\`, `%USERPROFILE%`,
+`C:\Users\Public\`, `/Users/Shared/`, `/home/$USER/`, `icon@2x.png`,
+`git@github.com`, `@example.com`. Nothing is required in front of a home path,
+because compilers pack string constants back to back (`…valueC:\Users\…`
+above), but a `/home/…` that is part of a URL is skipped.
+
+### Deny terms and the allow-list
+
+`--deny-terms <file>` adds your own terms: your name, your machines' host
+names, an internal domain. One term per line, case-insensitive, at least three
+characters. Lines starting with `#` are comments. Each term is matched as
+UTF-8 and as UTF-16LE. **Keep this file outside the repository.** It has no
+default location, and prodcheck never looks for one, because the one place a
+list of what must not leak cannot live is next to the code it guards. The terms
+are never printed: a finding names the line number (`[deny-term line 3]`), and
+the JSON reports how many terms were loaded but not what they are. An empty
+file is an error, not a clean pass.
+
+`--allow <file>` lists known false positives, one per line:
+
+```
+# <location-glob>                  <rule|*>           [pattern]
+dist/*.tgz!package/package.json    email-address      @zeropointlogic.io
+**/THIRD-PARTY-NOTICES.txt         email-address
+dist/os-*.iso!**                   unix-home-path     /^\/home\/buildd\//
+```
+
+The glob is matched against the whole location (`*` stops at `/` and `!`,
+`**` does not). The optional pattern is matched against the unredacted value,
+as a case-insensitive substring or as a `/regex/`. An unknown rule name is an
+error, because a typo would otherwise allow nothing and fail silently. Allowed
+findings are counted on the summary row. Allow-list lines that matched nothing
+are listed too, so stale entries can be removed.
+
+### Exit codes and JSON
+
+| Code | Meaning |
+| --- | --- |
+| `0` | every byte was read, nothing found |
+| `1` | findings, after the allow-list |
+| `2` | the scan failed: bad flag, unreadable artifact or list file |
+| `3` | nothing found, but something could not be read |
+
+`3` is not clean. It means part of the artifact was never read: an encrypted
+or bzip2/LZMA zip entry, an xz, zstd, 7z, rar, squashfs or cab payload, a
+UDF-only image, nesting past `--max-depth`, an entry over the inflate cap. Each
+of these is listed under `NOT SCANNED` with its reason, and its raw bytes are
+still scanned. `--allow-gaps` turns `3` into `0` once you have decided those
+gaps are acceptable.
+
+`--json` emits `scan` (inputs, counts, bytes, duration), `summary` (`total`,
+`byRule`, `allowed`, `gaps`, `unusedAllowLines`), `findings` (each with
+`rule`, `artifact`, `path` as an array of entry names, `where`, `offset`,
+`encoding`, the redacted `snippet`, and `denyTermLine` for deny terms) and
+`gaps`. `where` is `content` for a match inside an entry's data, and `header`
+or `container` for one in the container's own bytes. In those two cases
+`offset` counts from the start of the container.
+
+### What it does not cover
+
+- **Compression it cannot open.** xz, bzip2, zstd, 7z, rar, lz4, squashfs,
+  cab and zip methods other than stored/deflate are detected and reported as
+  gaps, not read. Brotli has no magic number and is read as raw bytes, which
+  finds nothing inside it. Compressed sections inside an otherwise readable
+  file (PE resources, PDF streams, PNG text chunks, a zip appended to an
+  `.exe`) are not unpacked either.
+- **UDF-only images and Rock Ridge names.** An ISO that has only UDF is a gap.
+  Rock Ridge long names are not decoded, so Rock Ridge images report the
+  8.3 names. Both still get the raw pass.
+- **Encodings other than UTF-8/ASCII and UTF-16.** A user name written in a
+  legacy code page, or obfuscated, base64-encoded or split across two
+  strings, is not found.
+- **Rules are shapes, not verification.** A token is reported because it looks
+  like one. Nothing is sent anywhere to check whether it is live.
+- **Symlinks** inside a scanned directory are not followed.
+
 ## Known limitations
 
 The detectors are lexical passes, not full parsers — a deliberate trade-off to
