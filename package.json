@@ -28,7 +28,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "prodcheck": "./src/cli.mjs"
+    "prodcheck": "./src/cli.mjs",
+    "prodcheck-claims": "./src/claims/cli.mjs"
   },
   "files": [
     "src",

@@ -780,6 +780,184 @@ That is the same line you are being asked to delete, so this is a reason to
 rotate it rather than a reason to hide it — but know it before piping the JSON
 somewhere public.
 
+## Page claims = shipped bytes (`prodcheck-claims`)
+
+A second, separate command checks what a **store page says about an archive**
+against the bytes in that archive. It exists because of a real listing for an
+asset pack: the page described the pack as something "on disk", called it
+"no AI", and gave icon counts and sizes typed in by hand. None of that was
+checked against the zip that people downloaded, and some of it was false.
+
+The promises go in a claims file (JSON). The verifier reads the `.zip` (or the
+folder before it is zipped) and the page text, and gives each claim a PASS or
+a FAIL with what was expected and what was found. If any claim fails, it exits
+with 1.
+
+```bash
+# From a checkout (after install the command is just `prodcheck-claims`):
+node src/claims/cli.mjs verify pack.zip --claims claims.json --page page.html
+node src/claims/cli.mjs verify pack/    --claims claims.json --page page.txt --json
+node src/claims/cli.mjs generate pack.zip --out claims.json   # claims taken from the archive
+node src/claims/cli.mjs generate pack.zip --facts             # page sentences, numbers from the manifest
+```
+
+A runnable example is in [`sample/claims/`](sample/claims). The page says
+"4 icons, 32x32 and 64x64 px … no AI", and the pack has three 32x32 icons.
+This is the exact output of
+`cd sample/claims && node ../../src/claims/cli.mjs verify pack --claims claims.json --page page.html --no-color`
+(PASS rows shortened):
+
+```
+  PASS  integrity                  directory is readable and self-consistent
+        none
+  FAIL  groups.icons.count         "icons" (icons/*.png) file count
+        expected: 4
+        actual:   3
+  FAIL  groups.icons.dimensions    "icons" image dimensions
+        expected: only 32x32, 64x64, each present
+        actual:   32x32 ×3
+        - claimed 64x64 but no file has it
+  …
+  FAIL  page.forbidden.no AI       page does not say "no AI"
+        expected: absent
+        actual:   found ×1
+        - … px, mit licence. hand drawn, no ai.…
+  FAIL  page.counts.(\d+)\s+icons  every page number matching /(\d+)\s+icons/ equals the group "icons" count
+        expected: 3
+        actual:   "4 icons"
+        - page says "4 icons", archive has 3
+  FAIL  page.dimensionsExist       every WxH size the page mentions exists in the archive
+        expected: each mentioned size present
+        actual:   mentions 32x32, 64x64
+        - page mentions 64x64, no image has it
+
+  --------------------------------------------------------------------------
+  12 claims · 7 pass · 5 FAIL · pack (directory, 5 files, 2,189 B)
+```
+
+### The claims file
+
+Every key is optional, but at least one claim has to be present. **Unknown keys
+are an error.** If you misspell `"forbiden"`, the run stops with exit 2. It
+does not quietly check less.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "files": {
+    "total": 131,                              // a number means exactly that many
+    "byExtension": { "png": 128, "txt": 3 },   // or a range: { "min": 100, "max": 140 }
+    "exhaustive": true                         // a file type not listed above FAILs
+  },
+  "groups": [                                  // named sets of files, picked by glob
+    { "name": "icons", "glob": "**/icons/**/*.png", "count": 128,
+      "dimensions": ["32x32", "64x64"] }       // every image must have one of these sizes,
+  ],                                           // and every size listed must appear at least once
+  "totalBytes": { "min": "1 MB", "max": "5 MB" },     // uncompressed; B, KB/MB/GB, KiB/MiB/GiB
+  "paths": {
+    "required":  ["LICENSE.txt", "/icons/"],          // glob; a trailing / means a folder
+    "forbidden": ["__MACOSX/", ".DS_Store", "*.psd"]
+  },
+  "names": {
+    "asciiOnly": true,                                // no non-ASCII file or folder names
+    "forbiddenRegex": ["^(pictograme|imagini)$"]      // per name, case-insensitive
+  },
+  "docs": { "license": true, "readme": true },        // a non-empty LICENSE*/README* anywhere
+  "images": { "contentMatchesExtension": true },      // a JPEG named .png FAILs
+  "page": {                                           // needs --page
+    "required":  ["MIT licence"],
+    "forbidden": ["no AI", "on disk"],
+    "counts": [                                       // every number the regex finds on the page
+      { "regex": "(\\d[\\d,]*)\\s+icons", "group": "icons" },   // must equal the real count
+      { "regex": "(\\d+) PNG", "extension": "png" },
+      { "regex": "(\\d+) files", "total": true }
+    ],
+    "dimensionsExist": true                           // every WxH on the page exists in the archive
+  }
+}
+```
+
+(The comments are only there to explain the keys. The real file is plain JSON.)
+
+**Globs** work like `.gitignore`. `*` and `?` match inside one path segment,
+`**` matches any number of segments, and `{a,b}` matches either. A pattern
+with no inner `/` (`.DS_Store`, `__MACOSX/`) matches at any depth. A pattern
+with an inner or leading `/` (`icons/*.png`, `/icons/`) is anchored at the
+archive root. Matching is case-sensitive.
+
+**A claim with nothing to check fails.** If a `page.counts` pattern does not
+appear on the page, if a group glob matches no files, or if
+`dimensionsExist` runs on a page that mentions no sizes, the claim is a FAIL
+and not a PASS. A green row has to mean that something was compared.
+
+**Integrity is always checked.** The reader does not trust the zip's central
+directory. It decompresses every entry, counts the bytes and recomputes the
+CRC-32. A size or CRC that disagrees with the directory is a FAIL. So are an
+encrypted entry, an unsupported compression method, a duplicate name, a path
+with `..` or a leading `/`, a backslash in a name, and, for folders, a symlink.
+Every size check uses the counted bytes.
+
+**Page phrases are folded before matching.** Case, Unicode width (NFKC),
+curly quotes, hyphens and runs of whitespace are all normalised. So "no AI"
+also catches "No-AI", "NO  AI" and "ｎｏ ＡＩ". Matching is on whole words, so
+"piano air" does not contain "no ai". A `.html`/`.htm` page has its tags,
+scripts, styles and comments removed first. Any other file is read as plain
+text.
+
+### Generating claims instead of typing them
+
+`generate` writes the strictest claims the archive passes today: exact file
+counts per extension, the exact uncompressed size, one group per image
+extension with every size found, the licence and readme it ships, and the
+standard junk files it does not contain. Verify the next build against that
+file and any change shows up as a FAIL. It does not write a `page` section,
+because it has never seen the page. Add `page.counts` and `page.forbidden` by
+hand, so the page numbers are checked against the same manifest.
+`generate --facts` prints the sentences for the page with the numbers already
+filled in:
+
+```
+5 files, 2.2 KB uncompressed (2,189 bytes).
+3 PNG images, 32x32 px.
+Licence: LICENSE.txt.
+```
+
+`generate` refuses an archive that has integrity problems. Pinning claims to a
+corrupt archive would make the corruption the expected state.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | every claim passed (or `generate` succeeded) |
+| `1` | at least one claim failed |
+| `2` | the run itself failed: bad flag, unreadable or invalid claims file, a claim key it does not know, a file that is not a zip, or page claims without `--page` |
+
+### What it does not check
+
+- **Whether a name is English.** `asciiOnly` catches non-ASCII names
+  (`ștergere`). An ASCII word in another language (`pictograme`) is only caught
+  by a `forbiddenRegex` list that you write.
+- **Pixel data.** Sizes come from the image headers (PNG IHDR, GIF screen
+  descriptor, WebP VP8/VP8L/VP8X, JPEG SOF). If the header is valid and the
+  body is corrupt, the file still reports its declared size. SVG, ICO, AVIF,
+  TIFF and other formats are not images to this tool. They count as files but
+  never satisfy a `dimensions` claim.
+- **Claims written as prose.** The page is checked only through the phrases
+  and regexes in the claims file. A false sentence that no rule mentions passes
+  without being seen.
+- **YAML claims files**, because the tool has zero dependencies. Only JSON is
+  accepted.
+- **Other archive formats** (`.7z`, `.rar`, `.tar.gz`), compression methods
+  other than stored and deflate, and encrypted zips. The last two are reported
+  as integrity FAILs, not skipped.
+- **Very large archives.** The zip is read into memory whole, and each entry
+  is decompressed in full to check its CRC.
+- **Unflagged non-ASCII names** in a zip are read as UTF-8 when they are valid
+  UTF-8, as Info-ZIP and macOS write them. Otherwise they are read as CP437.
+  A zip made with a legacy Windows code page other than 437 will show
+  mis-decoded names. `asciiOnly` still flags them.
+
 ## About
 
 `prodcheck` is a [Zero Point Logic](https://zeropointlogic.io) tool, built by

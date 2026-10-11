@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "description": "What the page in page.html promises about pack/.",
+  "groups": [
+    { "name": "icons", "glob": "icons/*.png", "count": 4, "dimensions": ["32x32", "64x64"] }
+  ],
+  "paths": { "forbidden": ["__MACOSX/", ".DS_Store"] },
+  "names": { "asciiOnly": true },
+  "docs": { "license": true, "readme": true },
+  "page": {
+    "required": ["MIT licence"],
+    "forbidden": ["no AI"],
+    "counts": [{ "regex": "(\\d+)\\s+icons", "group": "icons" }],
+    "dimensionsExist": true
+  }
+}
