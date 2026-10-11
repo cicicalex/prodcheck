@@ -1,0 +1,39 @@
+{
+  "timeoutMs": 60000,
+  "checks": [
+    {
+      "name": "webhook detector tests",
+      "run": "node --test tests/detector.test.mjs",
+      "breakers": [
+        {
+          "name": "detector never reports anything",
+          "patch": "gates/webhook-never-reports.patch"
+        },
+        {
+          "name": "stripe fixture fixed (catch re-throws)",
+          "replace": {
+            "file": "tests/fixtures/webhook/app/api/stripe/webhook/route.ts",
+            "content": "export async function POST(req: Request) {\n  try {\n    return new Response('ok', { status: 200 });\n  } catch (err) {\n    throw err;\n  }\n}\n"
+          }
+        },
+        {
+          "name": "github fixture deleted",
+          "setup": "rm tests/fixtures/webhook/github-webhook.mjs"
+        }
+      ]
+    },
+    {
+      "name": "published code scans clean",
+      "run": "node src/cli.mjs src --no-color",
+      "breakers": [
+        {
+          "name": "a swallowing stripe webhook lands in src/",
+          "replace": {
+            "file": "src/api/stripe/webhook/route.ts",
+            "content": "export async function POST(req: Request) {\n  try {\n    await handle(req);\n  } catch (e) {\n    return new Response('ok', { status: 200 });\n  }\n}\n"
+          }
+        }
+      ]
+    }
+  ]
+}
