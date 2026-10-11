@@ -28,7 +28,8 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "prodcheck": "./src/cli.mjs"
+    "prodcheck": "./src/cli.mjs",
+    "prodcheck-nondet": "./src/nondet-cli.mjs"
   },
   "files": [
     "src",

@@ -412,6 +412,115 @@ Severity is never carried by colour alone: each level has its own ASCII glyph
 (`!!`, `!`, `~`, `-`), so the report stays readable in CI logs, when piped to a
 file, and for colourblind readers.
 
+## Nondeterminism detector: `prodcheck-nondet`
+
+A second, separate command, for a bug no static scan sees: a program whose
+output depends on something other than its input. The incident behind it was a
+Python job that picked a category by iterating over a `set`. CPython
+randomizes string hashing per process, so the pick changed from one run to the
+next on the same input — and the single green test run in CI said nothing. One
+run proves one outcome, not *the* outcome.
+
+`prodcheck-nondet` runs the command N times (default 8) and compares every run
+with the first:
+
+| Run | Role | Environment |
+| --- | --- | --- |
+| 0 | baseline | `PYTHONHASHSEED=0`, plus the first value of every other varied dimension |
+| 1 | control | exactly the same as run 0. If this already differs, the program is nondeterministic on its own (clock, randomness, concurrency) and no perturbation is blamed |
+| 2 | perturbed | `PYTHONHASHSEED=random` |
+| 3+ | perturbed | `PYTHONHASHSEED=<generated integer>`; the generator is seeded by `--seed`, printed on every report, so a report can be replayed |
+
+Optional dimensions move on the perturbed runs too: `--vary-tz` (TZ),
+`--vary-locale` (LC_ALL and LANG together), and `--vary-env NAME=a,b,c` for any
+variable you name (its first value is the baseline). When a perturbed run
+differs and the control did not, one differing run is replayed once per
+dimension, changing only that one, so the report says which perturbation
+*alone* reproduces the difference.
+
+Each run compares exit code, stdout, stderr and every file under the
+`--output` paths (by content; text files get a diff, binary files a sha256).
+Each run gets its own fresh copy of `--workdir` (default `.`, minus `.git` and
+`node_modules`) in a new temporary directory and runs there, so no run can see
+another run's files. Runs are sequential, so contention between them is not a
+perturbation the report cannot name.
+
+```bash
+# From a checkout of this repository (the command goes after --):
+node src/nondet-cli.mjs -- python3 pick_category.py input.json
+
+# Compare an output directory too, and also vary the timezone and locale:
+node src/nondet-cli.mjs --output out --vary-tz --vary-locale -- python3 build_report.py
+
+# Timestamps are expected to differ: replace them before comparing.
+node src/nondet-cli.mjs --normalize '\d{4}-\d\d-\d\dT[\d:.]+' -- python3 job.py
+
+# Vary your own knobs, 12 runs, 30 s per run, JSON for CI:
+node src/nondet-cli.mjs --vary-env WORKERS=1,4,16 --runs 12 --timeout 30 --json -- ./run.sh
+
+# Installed from npm (a version that includes it) the command is `prodcheck-nondet`:
+prodcheck-nondet --help
+```
+
+Below is the output of
+`node src/nondet-cli.mjs --no-color --seed 7 --workdir tests/fixtures/nondet -- python3 set_order.py`
+over the incident reduced to eight lines
+([`tests/fixtures/nondet/set_order.py`](tests/fixtures/nondet/set_order.py)).
+The shown diff comes from run 3 rather than run 2 on purpose: run 2's seed is
+the literal `random`, which nobody can replay, so the report prefers a run
+whose values are all fixed. The baseline's order and the run 3 line are those
+of the CPython this was generated with (3.11); another CPython version may
+print other orders, with the same verdict.
+
+```
+  command  python3 set_order.py
+  varied   PYTHONHASHSEED   seed 7
+
+  run  0  same     baseline  PYTHONHASHSEED=0  baseline
+  run  1  same     control   PYTHONHASHSEED=0
+  run  2  DIFFERS  perturbed PYTHONHASHSEED=random  stdout
+  run  3  DIFFERS  perturbed PYTHONHASHSEED=50271532  stdout
+  run  4  DIFFERS  perturbed PYTHONHASHSEED=266108690  stdout
+  run  5  DIFFERS  perturbed PYTHONHASHSEED=4195786333  stdout
+  run  6  DIFFERS  perturbed PYTHONHASHSEED=3002305429  stdout
+  run  7  DIFFERS  perturbed PYTHONHASHSEED=2239590374  stdout
+
+  difference: run 3 vs baseline (changed: PYTHONHASHSEED)
+
+     stdout
+     @@ line 1 @@
+     - category: refund
+     - order: refund,account,login,tax,shipping,fraud,billing,invoice
+     + category: invoice
+     + order: invoice,login,shipping,tax,billing,refund,account,fraud
+
+  which perturbation (replaying run 3 one dimension at a time)
+     PYTHONHASHSEED=50271532  alone reproduces: stdout
+
+  --------------------------------------------------------------------------
+  NONDETERMINISTIC  6 of 7 runs differ from the baseline
+```
+
+`--normalize <regex>` (repeatable) takes a JavaScript regular expression;
+every match in stdout, stderr and text output files is replaced by
+`<normalized>` before comparing. Without it the timestamp fixture is reported
+with the control run flagged; with it the same script passes.
+
+**Exit codes.** `0` all runs agree · `1` at least one run differs ·
+`2` verification incomplete: a run hit `--timeout` (default 60 s; the whole
+process group is killed), the command did not start, or a flag was bad. A
+timeout is never read as "same": eight runs that never finished prove nothing.
+
+**What it does not cover.** It finds nondeterminism that N runs happen to
+expose; a passing report is evidence, not proof. Perturbations are environment
+variables only: it does not vary the clock itself, CPU count, scheduling,
+filesystem order, network, or `random` without a seed — those show up only as
+a control-run difference, if they show up at all. Absolute paths the command
+writes outside `--workdir` are not isolated or compared. A locale the host has
+not installed falls back to C silently, which makes that run less perturbed,
+never falsely different. On Windows a timeout kills the child, not its whole
+process tree.
+
 ## Known limitations
 
 The detectors are lexical passes, not full parsers — a deliberate trade-off to
