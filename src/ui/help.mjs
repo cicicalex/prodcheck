@@ -23,7 +23,7 @@ export function renderHelp(version = '0.0.0') {
 ${style.bold(NAME)} ${style.dim(`v${version}`)} — finds the production bugs that ship green
 
 ${h('usage')}
-  ${NAME} [path] [options]
+  ${NAME} [path] [options]       ${style.dim(`built artifacts: ${NAME} artifacts --help`)}
 
 ${h('examples')}
   ${style.cyan(`${NAME} .`)}                     scan the current directory

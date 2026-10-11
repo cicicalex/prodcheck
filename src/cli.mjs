@@ -3,6 +3,7 @@
  * prodcheck — CLI entrypoint.
  *
  *   prodcheck [path] [--fail-on <level>] [--json] [--no-color] [-h] [-v]
+ *   prodcheck artifacts <artifact|dir>... [options]   (see src/artifacts/cli.mjs)
  *
  * One structural rule shapes this file: the ui modules read the environment at
  * module load (theme.mjs decides color once, at import time). So argument
@@ -128,6 +129,15 @@ function order(findings) {
 }
 
 async function main() {
+  // `prodcheck artifacts …` is a separate command with its own flags: it reads
+  // built artifacts as bytes rather than source as code (src/artifacts/).
+  if (process.argv[2] === 'artifacts') {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const { runArtifacts } = await import('./artifacts/cli.mjs');
+    process.exitCode = await runArtifacts(process.argv.slice(3), pkg);
+    return;
+  }
+
   const opts = parseArgs(process.argv.slice(2));
 
   // Must happen before any ui import — theme.mjs reads env at module load.
