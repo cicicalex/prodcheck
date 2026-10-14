@@ -69,7 +69,7 @@ Copied verbatim, including the upsell row the report always appends:
   --------------------------------------------------------------------------
   2 issues · 1 critical · 3 files · 0.1s
 
-  → 4 more checks in prodcheck pro
+  → 4 more checks designed, not built yet
 ```
 
 The prose is long because it is the finding's own `impact` field, not a
@@ -124,9 +124,6 @@ subtraction that keeps the two counts honest — `LOCKED_PAID_CHECKS` is
 `7 - checks.length`, never a number typed in twice.
 
 ## Usage
-
-Until the package is published, the entrypoint is `node src/cli.mjs` from a
-checkout; every flag below is the same either way.
 
 ```bash
 node src/cli.mjs sample                 # the three-file sample in this repository
@@ -779,6 +776,15 @@ committed as the default, it appears in the report and therefore in your CI log.
 That is the same line you are being asked to delete, so this is a reason to
 rotate it rather than a reason to hide it — but know it before piping the JSON
 somewhere public.
+
+### Not detected: `trust proxy` set to `true` with a `req.ip`-keyed limiter
+
+prodcheck does not flag `app.set('trust proxy', true)` combined with a rate
+limiter keyed on `req.ip`. With `trust proxy` set to `true`, Express derives
+`req.ip` from the left-most `X-Forwarded-For` entry, which the client can set
+([Express `req.ip`](https://expressjs.com/en/5x/api/request)), so each request
+can claim a fresh address and the limiter is bypassed. Set a hop count instead
+of `true` (for example `app.set('trust proxy', 1)` behind one proxy).
 
 ## About
 
