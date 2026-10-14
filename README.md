@@ -125,9 +125,6 @@ subtraction that keeps the two counts honest — `LOCKED_PAID_CHECKS` is
 
 ## Usage
 
-Until the package is published, the entrypoint is `node src/cli.mjs` from a
-checkout; every flag below is the same either way.
-
 ```bash
 node src/cli.mjs sample                 # the three-file sample in this repository
 node src/cli.mjs .                      # scan the current directory
