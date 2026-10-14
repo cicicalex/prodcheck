@@ -69,7 +69,7 @@ Copied verbatim, including the upsell row the report always appends:
   --------------------------------------------------------------------------
   2 issues · 1 critical · 3 files · 0.1s
 
-  → 4 more checks in prodcheck pro
+  → 4 more checks designed, not built yet
 ```
 
 The prose is long because it is the finding's own `impact` field, not a

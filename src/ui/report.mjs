@@ -90,7 +90,7 @@ export function renderReport(result) {
 
   if (lockedChecks > 0) {
     out.push('');
-    out.push(`${GUTTER}${style.dim(`→ ${lockedChecks} more checks in`)} ${style.cyan('prodcheck pro')}`);
+    out.push(`${GUTTER}${style.dim(`→ ${lockedChecks} more checks designed, not built yet`)}`);
   }
 
   out.push('');
