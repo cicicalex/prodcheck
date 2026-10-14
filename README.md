@@ -777,6 +777,15 @@ That is the same line you are being asked to delete, so this is a reason to
 rotate it rather than a reason to hide it — but know it before piping the JSON
 somewhere public.
 
+### Not detected: `trust proxy` set to `true` with a `req.ip`-keyed limiter
+
+prodcheck does not flag `app.set('trust proxy', true)` combined with a rate
+limiter keyed on `req.ip`. With `trust proxy` set to `true`, Express derives
+`req.ip` from the left-most `X-Forwarded-For` entry, which the client can set
+([Express `req.ip`](https://expressjs.com/en/5x/api/request)), so each request
+can claim a fresh address and the limiter is bypassed. Set a hop count instead
+of `true` (for example `app.set('trust proxy', 1)` behind one proxy).
+
 ## About
 
 `prodcheck` is a [Zero Point Logic](https://zeropointlogic.io) tool, built by
