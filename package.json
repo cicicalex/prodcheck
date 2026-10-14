@@ -1,6 +1,6 @@
 {
   "name": "@zeropointlogic/prodcheck",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Finds production bugs that ship green: swallowed webhooks, bypassable rate limits, and secrets with hard-coded fallbacks. A Zero Point Logic tool.",
   "author": "Ciciu Alexandru-Costinel <contact@zeropointlogic.io>",
   "homepage": "https://github.com/cicicalex/prodcheck#readme",
