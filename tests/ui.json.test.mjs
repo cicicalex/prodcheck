@@ -106,8 +106,8 @@ test('every finding carries a docs URL derived from its rule', () => {
     finding('critical', { rule: 'webhook-swallows-2xx' }),
     finding('high', { rule: 'rate-limit-bypass' }),
   ]);
-  assert.equal(findings[0].docs, 'https://zeropointlogic.io/prodcheck/rules/webhook-swallows-2xx');
-  assert.equal(findings[1].docs, 'https://zeropointlogic.io/prodcheck/rules/rate-limit-bypass');
+  assert.equal(findings[0].docs, 'https://github.com/cicicalex/prodcheck/blob/main/docs/rules/webhook-swallows-2xx.md');
+  assert.equal(findings[1].docs, 'https://github.com/cicicalex/prodcheck/blob/main/docs/rules/rate-limit-bypass.md');
 });
 
 test('finding fields pass through: rule, severity, line, impact', () => {

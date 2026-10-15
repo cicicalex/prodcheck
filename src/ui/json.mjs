@@ -61,7 +61,7 @@ export function renderJson(result, meta = {}) {
       column: f.column ?? null,
       impact: f.impact,
       fix: f.fix ? { remove: f.fix.remove ?? [], add: f.fix.add ?? [] } : null,
-      docs: `https://zeropointlogic.io/prodcheck/rules/${f.rule}`,
+      docs: `https://github.com/cicicalex/prodcheck/blob/main/docs/rules/${f.rule}.md`,
     })),
   };
 
