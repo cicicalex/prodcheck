@@ -66,7 +66,7 @@ export function renderReport(result) {
     out.push(`${GUTTER}${style.green(style.bold(`${tick} clean`))}  no issues found`);
     out.push('');
     out.push(
-      `${GUTTER}${style.dim(`${filesScanned} files · ${(durationMs / 1000).toFixed(1)}s`)}`
+      `${GUTTER}${style.dim(`${filesScanned} ${filesScanned === 1 ? 'file' : 'files'} · ${(durationMs / 1000).toFixed(1)}s`)}`
     );
     out.push('');
     return out.join('\n');
@@ -83,14 +83,14 @@ export function renderReport(result) {
     style.bold(`${findings.length} ${findings.length === 1 ? 'issue' : 'issues'}`),
   ];
   if (critical) parts.push(style.red(style.bold(`${critical} critical`)));
-  parts.push(`${filesScanned} files`);
+  parts.push(`${filesScanned} ${filesScanned === 1 ? 'file' : 'files'}`);
   parts.push(style.green(`${(durationMs / 1000).toFixed(1)}s`));
 
   out.push(`${GUTTER}${parts.join(style.dim(' · '))}`);
 
   if (lockedChecks > 0) {
     out.push('');
-    out.push(`${GUTTER}${style.dim(`→ ${lockedChecks} more checks in`)} ${style.cyan('prodcheck pro')}`);
+    out.push(`${GUTTER}${style.dim(`→ ${lockedChecks} more checks planned`)}`);
   }
 
   out.push('');

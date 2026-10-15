@@ -194,10 +194,9 @@ test('renderReport: uses ASCII rule (not box drawing) when color is off', () => 
 
 test('renderReport: upsell row appears only when lockedChecks > 0', () => {
   const withUpsell = report([finding('low')], { lockedChecks: 4 });
-  assert.ok(withUpsell.includes('4 more checks in'), withUpsell);
-  assert.ok(withUpsell.includes('prodcheck pro'), withUpsell);
+  assert.ok(withUpsell.includes('4 more checks planned'), withUpsell);
   const without = report([finding('low')]);
-  assert.ok(!without.includes('prodcheck pro'), without);
+  assert.ok(!without.includes('more checks planned'), without);
 });
 
 // -------------------------------------------------------------- renderHelp()

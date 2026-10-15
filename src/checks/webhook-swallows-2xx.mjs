@@ -112,12 +112,9 @@ const CONTENT_HINT = /stripe\.webhooks|constructEvent|svix|webhook/i;
  * Keeping strings was deliberate and stays deliberate: Express registers webhooks
  * as string paths, and stripping strings would blind the rule to exactly those
  * files. But "keep strings" was implemented as "match the word anywhere", and a
- * sentence is a string too. Found by dogfooding on `zero-point-logic` `main`:
- *
- *     `webhook resolves plans through the same map, so these customers ...`
- *
- * — one prose line inside a template literal made `api/admin/revenue/route.ts`
- * a webhook candidate, and its perfectly reasonable 200-with-zeros fallback was
+ * sentence is a string too. Found by dogfooding on a real Next.js codebase:
+ * one prose line containing the word *webhook* inside a template literal made
+ * an admin route a webhook candidate, and its perfectly reasonable 200-with-zeros fallback was
  * reported CRITICAL. Isolated by deleting one word at a time: removing it from
  * the string cleared the finding; removing it from the two comments did not.
  *
@@ -140,7 +137,7 @@ const IMPACT =
   'marks the event delivered and never retries. The failed event is silently ' +
   'lost — no retry, no alert, no trace in the provider dashboard.';
 
-const FIX_ADD = '} catch (e) { logger.error(e); throw e }';
+const FIX_ADD = "return new Response('webhook handler failed', { status: 500 });  // non-2xx so the provider retries";
 
 const isTwoXX = (n) => n >= 200 && n <= 299;
 

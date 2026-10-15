@@ -5,12 +5,11 @@
  * literal — `process.env.FMP_API_KEY ?? 'demo'` — in a file that then calls out
  * to the internet.
  *
- * This rule exists because of one line in the author's own code — a health-check
- * route in a private repository:
+ * A typical example:
  *
  *     const key = process.env.FMP_API_KEY || 'demo';
  *
- * The FMP key was deleted when the account was cancelled. Nothing broke.
+ * If the real key is ever removed, nothing breaks.
  * `'demo'` is Financial Modeling Prep's public sandbox key, so every request
  * kept being built, kept being sent and kept being answered — against a shared
  * credential instead of a paid one. No exception, no 401, no log line, no alert.

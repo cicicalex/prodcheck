@@ -131,7 +131,10 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
 
   // Must happen before any ui import — theme.mjs reads env at module load.
-  if (opts.noColor) process.env.NO_COLOR = '1';
+  if (opts.noColor) {
+    process.env.NO_COLOR = '1';
+    delete process.env.FORCE_COLOR;
+  }
 
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -206,6 +209,10 @@ async function main() {
   // walk skipped.
   for (const c of checks) {
     if (c.finalize) findings.push(...(c.finalize(facts.get(c) ?? new Map()) ?? []));
+  }
+
+  if (filesScanned === 0) {
+    process.stderr.write(`prodcheck: warning: no .js/.ts files found under ${opts.path}\n`);
   }
 
   const result = {
