@@ -1706,7 +1706,7 @@ function route(spec, local = 'getIp', imported = local) {
 }
 
 test('one finding however many call sites import the helper', () => {
-  // The zpl-finance shape: eleven routes, one helper, one line to change.
+  // The a-real-app shape: eleven routes, one helper, one line to change.
   const tree = { 'lib/rate-limit.js': HELPER_MODULE };
   for (let i = 0; i < 11; i++) tree[`app/api/r${i}/route.js`] = route('../../../lib/rate-limit.js');
 

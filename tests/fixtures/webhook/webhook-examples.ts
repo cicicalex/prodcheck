@@ -134,7 +134,7 @@ export async function good3_semnaturaInvalida(req: any, res: any) {
  * nimic: loghează și cade prin la procesarea reală.
  *
  * **Modelat după cod real de producție.** A fost primul fals pozitiv al
- * detectorului, găsit rulându-l pe `zpl-finance-repo`.
+ * detectorului, găsit rulându-l pe `a-real-app`.
  */
 export async function good5_idempotentaConditionala(req: any, res: any) {
   const ev = eveniment(req);

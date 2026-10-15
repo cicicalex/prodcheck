@@ -746,7 +746,7 @@ const envSchema = z.object({
 envSchema.safeParse(process.env);
 ```
 
-`codex-backend/src/config.ts` is the first shape and prodcheck correctly says
+`a-real-backend/src/config.ts` is the first shape and prodcheck correctly says
 nothing about it — but it would say nothing about the second either, and the
 second is exactly this rule's bug wearing a schema.
 

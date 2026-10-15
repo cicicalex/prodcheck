@@ -111,7 +111,7 @@ test('SILENT: the offending line in a comment, or in a string, is not code', () 
 
 test('SILENT: a build tool that declares the value public settles the question', () => {
   // This is the measured false positive, not an invented case. The shipped rule
-  // reported three MEDIUMs on zpl-finance's `sentry.*.config.ts`, each of the
+  // reported three MEDIUMs on a-real-app's `sentry.*.config.ts`, each of the
   // shape `process.env.NEXT_PUBLIC_SENTRY_DSN ?? "https://…ingest.sentry.io/…"`.
   // `DSN` passes SECRET_NAME and is not a location suffix, so the gates fired
   // correctly and the answer was still wrong: Next.js inlines every
@@ -246,7 +246,7 @@ test('configuration keeps its defaults, which is what makes the rule usable', ()
 });
 
 test('a name ending in a place is configuration, whatever it starts with', () => {
-  // Measured, not theorised. The first run of this rule against zpl-finance
+  // Measured, not theorised. The first run of this rule against a-real-app
   // produced nine findings and six of them were `process.env.AUTH_URL ??
   // "https://finance.zeropointlogic.io"` across five files — NextAuth's own
   // variable name, holding an origin, correctly defaulted, matched only because

@@ -92,7 +92,7 @@
  *     SECRET_KEY: z.string().min(32)                 correct, and invisible
  *     SECRET_KEY: z.string().default('dev-secret')   the same bug, and a MISS
  *
- * `codex-backend/src/config.ts` is the first shape, and this rule correctly
+ * `a-real-backend/src/config.ts` is the first shape, and this rule correctly
  * reports nothing there — but it would report nothing about the second either,
  * and the second is this bug wearing zod. Covering it means knowing which
  * library a `.default(…)` belongs to and that its subject is an env var, which

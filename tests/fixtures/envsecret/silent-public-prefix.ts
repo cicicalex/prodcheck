@@ -1,7 +1,7 @@
 /**
  * Prefixele publice: declarate de build tool, deci nu pot fi secrete.
  *
- * Modelat după `sentry.client.config.ts` din zpl-finance, care a fost primul
+ * Modelat după `sentry.client.config.ts` din a-real-app, care a fost primul
  * fals pozitiv al regulii. Toate patru trebuie să rămână TĂCUTE.
  */
 

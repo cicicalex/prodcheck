@@ -15,7 +15,7 @@ export const baseUrl = process.env.API_BASE_URL || 'https://api.example.com';
 // The one that made the last-segment veto necessary. `AUTH_URL` is NextAuth's
 // own variable name and it holds this site's origin — a place, not a
 // credential — and defaulting it to the production URL is deliberate. On
-// zpl-finance this single spelling was six of the rule's nine findings, in five
+// a-real-app this single spelling was six of the rule's nine findings, in five
 // different files, purely because `AUTH` is a substring of `AUTH_URL`.
 export const authUrl = process.env.AUTH_URL ?? 'https://finance.example.com';
 export const tokenEndpoint = process.env.OAUTH_TOKEN_ENDPOINT || 'https://id.example.com/token';

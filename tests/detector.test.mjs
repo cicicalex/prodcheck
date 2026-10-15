@@ -96,7 +96,7 @@ test('does not flag a non-webhook file whose catch returns 200', () => {
 //
 // `fixtures/webhook/webhook-examples.ts` is a VERBATIM copy of the labelled
 // fixture C1 built while implementing the same rule independently
-// (_ZPL_TEAM/pentru-C4/ship-safe-webhook/fixtures/webhook-examples.ts). It is
+// (ship-safe-webhook/fixtures/webhook-examples.ts). It is
 // kept byte-identical, Romanian comments and all — they name each case — so the
 // two copies stay diffable and either side can re-sync from the other. Only his
 // COVERAGE was taken: his implementation parses with `typescript`, and a
@@ -274,7 +274,7 @@ test('a webhook path keeps its candidacy regardless of content', () => {
 // LOCAL derived from the error rather than the binding itself. Only the direct
 // spelling was recognised, which meant the shape that appears most in real
 // TypeScript was the shape reported. Found by C1 running 45fc147 against
-// zpl-finance — 484 files, one critical, on correct code. The suite was green at
+// a-real-app — 484 files, one critical, on correct code. The suite was green at
 // 449 tests the whole time it was broken, which is why the negative cases below
 // matter more than the positive ones: the fix REMOVES reports, and a fix that
 // removes too many is indistinguishable from a green suite.
@@ -635,7 +635,7 @@ test('stripComments keeps a regex body and does not read /* inside one', () => {
 });
 
 test('the real csv-export shape — a regex in a template interpolation — stays lit', () => {
-  // Not adversarial: this is `zpl-finance/src/lib/csv-export.ts`, where ordinary
+  // Not adversarial: this is `a-real-app/src/lib/csv-export.ts`, where ordinary
   // CSV quoting took the file dark from its line 11 to EOF.
   const src = [
     'function esc(str) {',
@@ -979,7 +979,7 @@ for (const [label, source, atLine] of [
 
 test('clause (2): inline JSX SVG — two `/>` on one line leave that line lit', () => {
   // This one is not adversarial, it is what five icons in
-  // zpl-finance/src/app/dashboard/layout.tsx already look like. The `/` of the
+  // a-real-app/src/app/dashboard/layout.tsx already look like. The `/` of the
   // first `/>` is a refused regex whose span reaches the second `/>`, and every
   // attribute string of the second tag opens a frame inside that span. 826
   // characters of that one file used to be classified not-code on the strength
